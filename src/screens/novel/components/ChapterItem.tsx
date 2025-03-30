@@ -44,7 +44,7 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
   isUpdateCard,
   novelName,
 }) => {
-  const { id, name, unread, releaseTime, bookmark, chapterNumber, progress } =
+  const { id, name, unread, releaseTime, bookmark, chapterNumber, progress, isDownloaded, hasTranslation } =
     chapter;
   const {
     value: isMenuVisible,
@@ -117,6 +117,14 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
                 : getString('novelScreen.chapterChapnum', {
                     num: chapterNumber,
                   })}
+              {hasTranslation && (
+                <MaterialCommunityIcons
+                  name="translate"
+                  color={theme.primary}
+                  size={14}
+                  style={{ marginLeft: 4 }}
+                />
+              )}
             </Text>
           </View>
           <View
