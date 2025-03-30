@@ -8,9 +8,6 @@ import { showToast } from '@utils/showToast';
 export const fixTranslationColumn = async (): Promise<boolean> => {
   return new Promise(resolve => {
     try {
-      console.log('Fixing hasTranslation column...');
-
-      // Add hasTranslation column to Chapter table if it doesn't exist
       db.transaction(tx => {
         // First check if the column exists
         tx.executeSql(
@@ -18,30 +15,26 @@ export const fixTranslationColumn = async (): Promise<boolean> => {
           [],
           (_, { rows }) => {
             const columns = rows._array;
+
             const hasTranslationExists = columns.some(
               col => col.name === 'hasTranslation',
             );
 
             if (!hasTranslationExists) {
-              console.log('Adding hasTranslation column to Chapter table');
               tx.executeSql(
                 'ALTER TABLE Chapter ADD COLUMN hasTranslation INTEGER DEFAULT 0',
                 [],
                 () => {
-                  console.log('Successfully added hasTranslation column');
-
                   // Update existing translations if any
                   tx.executeSql(
                     `UPDATE Chapter SET hasTranslation = 1 
                      WHERE id IN (SELECT chapterId FROM Translation)`,
                     [],
                     () => {
-                      console.log('Updated existing translations');
                       showToast('Database migration completed successfully!');
                       resolve(true);
                     },
-                    (_, error) => {
-                      console.error('Error updating translations:', error);
+                    (_, _error) => {
                       showToast(
                         'Migration partially completed. Error updating translations.',
                       );
@@ -50,21 +43,18 @@ export const fixTranslationColumn = async (): Promise<boolean> => {
                     },
                   );
                 },
-                (_, error) => {
-                  console.error('Error adding hasTranslation column:', error);
+                (_, _error) => {
                   showToast('Error adding hasTranslation column to database.');
                   resolve(false);
                   return false;
                 },
               );
             } else {
-              console.log('hasTranslation column already exists');
               showToast('Database is already up to date.');
               resolve(true);
             }
           },
-          (_, error) => {
-            console.error('Error checking for hasTranslation column:', error);
+          (_, _error) => {
             showToast('Error checking database schema.');
             resolve(false);
             return false;
@@ -72,7 +62,6 @@ export const fixTranslationColumn = async (): Promise<boolean> => {
         );
       });
     } catch (error) {
-      console.error('Migration error:', error);
       showToast(
         'Database migration failed: ' +
           (error instanceof Error ? error.message : 'Unknown error'),

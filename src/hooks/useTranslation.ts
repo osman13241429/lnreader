@@ -28,7 +28,6 @@ export const useTranslation = (chapterId: number) => {
       // Using any type to bypass TypeScript checking for keys
       return getString(key as any, options);
     } catch (error) {
-      console.error(`Translation missing for key: ${key}`, error);
       return key.split('.').pop() || 'ERROR';
     }
   };
@@ -46,7 +45,6 @@ export const useTranslation = (chapterId: number) => {
       }
       return false;
     } catch (error) {
-      console.error('Error checking translation:', error);
       return false;
     }
   }, [chapterId]);
@@ -60,8 +58,8 @@ export const useTranslation = (chapterId: number) => {
     // Check if this chapter has a translation
     if (chapterId) {
       // Use the checkTranslation function via the callback
-      checkTranslation().catch(error => {
-        console.error('Error checking translation on chapter change:', error);
+      checkTranslation().catch(_error => {
+        // Silently handle error
       });
     }
   }, [chapterId, checkTranslation]);
@@ -163,13 +161,8 @@ export const useTranslation = (chapterId: number) => {
           tx.executeSql(
             'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
             [chapter.id],
-            () => {
-              console.log(
-                `Successfully updated hasTranslation flag for chapter ${chapter.id}`,
-              );
-            },
-            (_, error) => {
-              console.error('Error updating hasTranslation flag:', error);
+            () => {},
+            (_, _error) => {
               return false;
             },
           );
@@ -180,7 +173,6 @@ export const useTranslation = (chapterId: number) => {
         setShowTranslation(true);
         showToast(safeGetString('translation.success'));
       } catch (error) {
-        console.error('Error translating chapter:', error);
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
         showToast(safeGetString('translation.error', { error: errorMessage }));
@@ -206,7 +198,7 @@ export const useTranslation = (chapterId: number) => {
         setShowTranslation(!showTranslation);
       }
     } catch (error) {
-      console.error('Error toggling translation:', error);
+      // Silently handle error
     }
   }, [translationContent, showTranslation, checkTranslation, safeGetString]);
 
@@ -217,7 +209,6 @@ export const useTranslation = (chapterId: number) => {
       setShowTranslation(false);
       showToast(safeGetString('translation.deleted'));
     } catch (error) {
-      console.error('Error removing translation:', error);
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       showToast(
@@ -253,7 +244,6 @@ export const useTranslation = (chapterId: number) => {
       // Return the export file path so it can be opened if needed
       return exportFile;
     } catch (error) {
-      console.error('Error exporting translation:', error);
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       showToast(
