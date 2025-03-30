@@ -82,7 +82,7 @@ export const ChapterContent = ({
     // Check for translation when the chapter loads
     if (chapter?.id) {
       checkTranslation().catch(error => {
-        console.error("Error checking translation:", error);
+        console.error('Error checking translation:', error);
       });
     }
   }, [chapter, checkTranslation]);

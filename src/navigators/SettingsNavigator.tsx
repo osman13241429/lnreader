@@ -28,12 +28,9 @@ function SettingsStack() {
         name="TranslationsSettings"
         component={TranslationsSettings}
       />
-      <Stack.Screen
-        name="TranslationList"
-        component={TranslationListScreen}
-      />
+      <Stack.Screen name="TranslationList" component={TranslationListScreen} />
     </Stack.Navigator>
   );
 }
 
-export default SettingsStack; 
+export default SettingsStack;

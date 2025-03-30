@@ -87,7 +87,8 @@ const WebViewReader: React.FC<WebViewReaderProps> = ({
   const pluginCustomCSS = `file://${PLUGIN_STORAGE}/${plugin?.id}/custom.css`;
 
   // Content to display based on whether to show translation or original
-  const displayContent = showTranslation && translatedHtml ? translatedHtml : html;
+  const displayContent =
+    showTranslation && translatedHtml ? translatedHtml : html;
 
   useEffect(() => {
     const mmkvListener = MMKVStorage.addOnValueChangedListener(key => {
@@ -227,7 +228,9 @@ const WebViewReader: React.FC<WebViewReaderProps> = ({
             <body class="${
               chapterGeneralSettings.pageReader ? 'page-reader' : ''
             }">
-              <div id="LNReader-chapter" class="${showTranslation && translatedHtml ? 'translated-content' : ''}">
+              <div id="LNReader-chapter" class="${
+                showTranslation && translatedHtml ? 'translated-content' : ''
+              }">
                 ${displayContent}
               </div>
               <div id="reader-ui"></div>
@@ -242,7 +245,8 @@ const WebViewReader: React.FC<WebViewReaderProps> = ({
                   batteryLevel,
                   autoSaveInterval: 2222,
                   DEBUG: __DEV__,
-                  isTranslated: showTranslation && translatedHtml ? true : false,
+                  isTranslated:
+                    showTranslation && translatedHtml ? true : false,
                   strings: {
                     finished: `${getString(
                       'readerScreen.finished',

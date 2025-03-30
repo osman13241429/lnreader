@@ -1,8 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ActivityIndicator, TouchableOpacity, FlatList, Modal } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  FlatList,
+  Modal,
+} from 'react-native';
 import { Text, TextInput } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { fetchAvailableModels, OpenRouterModel } from '@services/translation/TranslationService';
+import {
+  fetchAvailableModels,
+  OpenRouterModel,
+} from '@services/translation/TranslationService';
 import { ThemeColors } from '@theme/types';
 import { showToast } from '@utils/showToast';
 import { getString } from '@strings/translations';
@@ -13,7 +23,11 @@ interface ModelDropdownProps {
   theme: ThemeColors;
 }
 
-const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme }) => {
+const ModelDropdown: React.FC<ModelDropdownProps> = ({
+  value,
+  onChange,
+  theme,
+}) => {
   const [models, setModels] = useState<OpenRouterModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -27,7 +41,9 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
         setModels(availableModels);
       } catch (error) {
         console.error('Failed to load models:', error);
-        showToast(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        showToast(
+          `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        );
       } finally {
         setLoading(false);
       }
@@ -40,7 +56,7 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
     ? models.filter(
         model =>
           model.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          model.name.toLowerCase().includes(searchQuery.toLowerCase())
+          model.name.toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : models;
 
@@ -54,14 +70,19 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
     if (item.pricing) {
       const promptPrice = parseFloat(item.pricing.prompt) * 1000000;
       const completionPrice = parseFloat(item.pricing.completion) * 1000000;
-      pricing = `${promptPrice.toFixed(2)}μ$ prompt, ${completionPrice.toFixed(2)}μ$ completion`;
+      pricing = `${promptPrice.toFixed(2)}μ$ prompt, ${completionPrice.toFixed(
+        2,
+      )}μ$ completion`;
     }
 
     return (
       <TouchableOpacity
         style={[
           styles.modelItem,
-          { backgroundColor: item.id === value ? theme.primaryContainer : theme.surface }
+          {
+            backgroundColor:
+              item.id === value ? theme.primaryContainer : theme.surface,
+          },
         ]}
         onPress={() => {
           onChange(item.id);
@@ -73,12 +94,19 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
             {item.name}
           </Text>
           {item.description ? (
-            <Text style={[styles.modelDescription, { color: theme.onSurfaceVariant }]}>
+            <Text
+              style={[
+                styles.modelDescription,
+                { color: theme.onSurfaceVariant },
+              ]}
+            >
               {item.description}
             </Text>
           ) : null}
           {pricing ? (
-            <Text style={[styles.modelPricing, { color: theme.onSurfaceVariant }]}>
+            <Text
+              style={[styles.modelPricing, { color: theme.onSurfaceVariant }]}
+            >
               {pricing}
             </Text>
           ) : null}
@@ -96,17 +124,13 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
         style={[styles.input, { backgroundColor: theme.surface }]}
         onPress={() => setModalVisible(true)}
       >
-        <Text 
+        <Text
           style={[styles.selectedText, { color: theme.onSurface }]}
           numberOfLines={1}
         >
           {selectedModel.name}
         </Text>
-        <Icon 
-          name="chevron-down" 
-          size={24} 
-          color={theme.onSurface} 
-        />
+        <Icon name="chevron-down" size={24} color={theme.onSurface} />
       </TouchableOpacity>
 
       <Modal
@@ -116,7 +140,9 @@ const ModelDropdown: React.FC<ModelDropdownProps> = ({ value, onChange, theme })
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={[styles.modal, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
-          <View style={[styles.modalContent, { backgroundColor: theme.background }]}>
+          <View
+            style={[styles.modalContent, { backgroundColor: theme.background }]}
+          >
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: theme.onSurface }]}>
                 Models
@@ -234,4 +260,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ModelDropdown; 
+export default ModelDropdown;

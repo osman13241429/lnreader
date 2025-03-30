@@ -44,8 +44,17 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
   isUpdateCard,
   novelName,
 }) => {
-  const { id, name, unread, releaseTime, bookmark, chapterNumber, progress, isDownloaded, hasTranslation } =
-    chapter;
+  const {
+    id,
+    name,
+    unread,
+    releaseTime,
+    bookmark,
+    chapterNumber,
+    progress,
+    isDownloaded,
+    hasTranslation,
+  } = chapter;
   const {
     value: isMenuVisible,
     setTrue: showMenu,

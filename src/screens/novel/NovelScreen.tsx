@@ -123,11 +123,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
     setFalse: closeDrawer,
   } = useBoolean();
 
-  const { 
-    apiKey, 
-    model, 
-    defaultInstruction 
-  } = useTranslationSettings();
+  const { apiKey, model, defaultInstruction } = useTranslationSettings();
 
   const onPageScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const y = event.nativeEvent.contentOffset.y;
@@ -306,9 +302,9 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
               novel,
               apiKey,
               model,
-              defaultInstruction
+              defaultInstruction,
             );
-            
+
             setUpdating(false);
             refreshChapters();
           }

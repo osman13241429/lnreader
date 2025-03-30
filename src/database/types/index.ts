@@ -110,7 +110,7 @@ export interface TranslationInfo {
   novelCover?: string;
   content: string;
   previewText: string;
-  model: string; 
+  model: string;
   createdAt: number;
 }
 

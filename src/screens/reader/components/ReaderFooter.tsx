@@ -122,12 +122,12 @@ const ChapterFooter = ({
             onPress={toggleTranslation}
           >
             <IconButton
-              icon={showTranslation ? "translate-off" : "translate"}
+              icon={showTranslation ? 'translate-off' : 'translate'}
               size={26}
               iconColor={showTranslation ? theme.primary : theme.onSurface}
             />
           </Pressable>
-        ) : (chapter?.isDownloaded === 1) ? (
+        ) : chapter?.isDownloaded === 1 ? (
           <Pressable
             android_ripple={rippleConfig}
             style={styles.buttonStyles}

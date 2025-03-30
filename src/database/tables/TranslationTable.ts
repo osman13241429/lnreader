@@ -9,4 +9,4 @@ export const createTranslationTableQuery = `
         UNIQUE(chapterId),
         FOREIGN KEY (chapterId) REFERENCES Chapter(id) ON DELETE CASCADE
     )
-`; 
+`;

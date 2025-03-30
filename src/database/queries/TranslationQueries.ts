@@ -8,7 +8,7 @@ export const saveTranslation = async (
   chapterId: number,
   content: string,
   model: string,
-  instruction: string
+  instruction: string,
 ): Promise<number> => {
   return new Promise((resolve, reject) => {
     db.transaction(tx => {
@@ -24,21 +24,21 @@ export const saveTranslation = async (
             'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
             [chapterId],
             noop,
-            txnErrorCallback
+            txnErrorCallback,
           );
           resolve(insertId || rowsAffected);
         },
         (_, error) => {
           reject(error);
           return false;
-        }
+        },
       );
     });
   });
 };
 
 export const getTranslation = async (
-  chapterId: number
+  chapterId: number,
 ): Promise<TranslationInfo | null> => {
   return new Promise(resolve => {
     db.transaction(tx => {
@@ -52,7 +52,7 @@ export const getTranslation = async (
             resolve(null);
           }
         },
-        txnErrorCallback
+        txnErrorCallback,
       );
     });
   });
@@ -71,7 +71,7 @@ export const deleteTranslation = async (chapterId: number): Promise<void> => {
               'UPDATE Chapter SET hasTranslation = 0 WHERE id = ?',
               [chapterId],
               noop,
-              txnErrorCallback
+              txnErrorCallback,
             );
             showToast('Translation deleted');
             resolve();
@@ -82,7 +82,7 @@ export const deleteTranslation = async (chapterId: number): Promise<void> => {
         (_, error) => {
           reject(error);
           return false;
-        }
+        },
       );
     });
   });
@@ -100,7 +100,7 @@ export const deleteAllTranslations = async (): Promise<number> => {
             'UPDATE Chapter SET hasTranslation = 0',
             [],
             noop,
-            txnErrorCallback
+            txnErrorCallback,
           );
           showToast(`All translations deleted (${rowsAffected})`);
           resolve(rowsAffected);
@@ -108,14 +108,14 @@ export const deleteAllTranslations = async (): Promise<number> => {
         (_, error) => {
           reject(error);
           return false;
-        }
+        },
       );
     });
   });
 };
 
 export const getChaptersWithTranslation = async (
-  novelId: number
+  novelId: number,
 ): Promise<number[]> => {
   return new Promise(resolve => {
     db.transaction(tx => {
@@ -129,13 +129,15 @@ export const getChaptersWithTranslation = async (
           }
           resolve(chapterIds);
         },
-        txnErrorCallback
+        txnErrorCallback,
       );
     });
   });
 };
 
-export const getAllTranslations = async (): Promise<Array<TranslationInfo & { novelName: string, chapterName: string }>> => {
+export const getAllTranslations = async (): Promise<
+  Array<TranslationInfo & { novelName: string; chapterName: string }>
+> => {
   return new Promise((resolve, reject) => {
     db.transaction(tx => {
       tx.executeSql(
@@ -151,7 +153,9 @@ export const getAllTranslations = async (): Promise<Array<TranslationInfo & { no
             const item = rows.item(i);
             translations.push({
               ...item,
-              previewText: item.content.substring(0, 50) + (item.content.length > 50 ? '...' : '')
+              previewText:
+                item.content.substring(0, 50) +
+                (item.content.length > 50 ? '...' : ''),
             });
           }
           resolve(translations);
@@ -159,43 +163,45 @@ export const getAllTranslations = async (): Promise<Array<TranslationInfo & { no
         (_, error) => {
           reject(error);
           return false;
-        }
+        },
       );
     });
   });
 };
 
-export const getAllTranslationsByNovel = async (): Promise<NovelGroupedTranslations[]> => {
+export const getAllTranslationsByNovel = async (): Promise<
+  NovelGroupedTranslations[]
+> => {
   try {
     // Get all translations
     const translations = await getAllTranslations();
-    
+
     // Bail early if no translations
     if (!translations || translations.length === 0) {
-      console.log("No translations found to group by novel");
+      console.log('No translations found to group by novel');
       return [];
     }
-    
+
     // Group by novel name first, then by novelId as fallback
     const novelGroups = new Map<string, any[]>();
-    
+
     // First pass - group translations by novel name
     translations.forEach(translation => {
-      const novelName = translation.novelName || "Unknown Novel";
-      
+      const novelName = translation.novelName || 'Unknown Novel';
+
       if (!novelGroups.has(novelName)) {
         novelGroups.set(novelName, []);
       }
-      
+
       novelGroups.get(novelName)?.push(translation);
     });
-    
+
     // Convert to our result format
     const result: NovelGroupedTranslations[] = [];
-    
+
     // Counter for generated novel IDs (for novels without an ID)
     let nextNovelId = -1;
-    
+
     // Second pass - create novel groups with chapters
     for (const [novelName, novelTranslations] of novelGroups.entries()) {
       // Find a consistent novelId for this group if possible
@@ -203,7 +209,7 @@ export const getAllTranslationsByNovel = async (): Promise<NovelGroupedTranslati
       const firstWithId = novelTranslations.find(t => t.novelId != null);
       const novelId = firstWithId?.novelId || nextNovelId--;
       const novelCover = firstWithId?.novelCover || null;
-      
+
       const novelGroup: NovelGroupedTranslations = {
         novelId,
         novelTitle: novelName,
@@ -212,25 +218,27 @@ export const getAllTranslationsByNovel = async (): Promise<NovelGroupedTranslati
           id: t.id,
           chapterId: t.chapterId,
           novelId: novelId, // Use the consistent novelId we found or generated
-          chapterTitle: t.chapterName || "Unknown Chapter",
-          novelTitle: t.novelName || "Unknown Novel",
+          chapterTitle: t.chapterName || 'Unknown Chapter',
+          novelTitle: t.novelName || 'Unknown Novel',
           novelCover: t.novelCover,
           content: t.content,
           previewText: t.previewText,
           model: t.model,
-          createdAt: t.createdAt
-        }))
+          createdAt: t.createdAt,
+        })),
       };
-      
+
       result.push(novelGroup);
     }
-    
-    console.log(`Grouped translations: ${result.length} novels with chapters:`, 
-      result.map(n => `${n.novelTitle}: ${n.chapters?.length || 0}`).join(", "));
-    
+
+    console.log(
+      `Grouped translations: ${result.length} novels with chapters:`,
+      result.map(n => `${n.novelTitle}: ${n.chapters?.length || 0}`).join(', '),
+    );
+
     return result;
   } catch (error) {
     console.error('Error grouping translations by novel:', error);
     return [];
   }
-}; 
+};

@@ -100,7 +100,7 @@ export const useTranslateBatch = () => {
       for (const item of items) {
         if (!item.novelId) {continue;}
 
-      const novelKey = `${item.novelId}`;
+        const novelKey = `${item.novelId}`;
         if (!novelChapters[novelKey]) {
           novelChapters[novelKey] = {
             novel: {
@@ -112,11 +112,11 @@ export const useTranslateBatch = () => {
           };
         }
 
-      // Ensure each chapter has the right IDs
+        // Ensure each chapter has the right IDs
         const chapterId = item.id || item.chapterId;
         if (!chapterId) {continue;}
 
-      novelChapters[novelKey].chapters.push({
+        novelChapters[novelKey].chapters.push({
           ...item,
           id: chapterId,
           chapterId: chapterId,
@@ -126,19 +126,19 @@ export const useTranslateBatch = () => {
       let totalTranslated = 0;
       let totalDownloads = 0;
 
-    // Process each novel's chapters
+      // Process each novel's chapters
       for (const novelKey in novelChapters) {
         const { novel, chapters } = novelChapters[novelKey];
 
-      // Check for chapters that need downloading
+        // Check for chapters that need downloading
         const chapterFilePaths = chapters.map(chapter => {
           return `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
         });
 
-      const fileExistsPromises = chapterFilePaths.map(filePath => FileManager.exists(filePath));
+        const fileExistsPromises = chapterFilePaths.map(filePath => FileManager.exists(filePath));
         const existsResults = await Promise.all(fileExistsPromises);
 
-      const chaptersToDownload = chapters.filter((_, index) => !existsResults[index]);
+        const chaptersToDownload = chapters.filter((_, index) => !existsResults[index]);
         const downloadFilePaths = chaptersToDownload.map(
           chapter =>
             `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`,
@@ -149,7 +149,7 @@ export const useTranslateBatch = () => {
           showToast(`Downloading ${chaptersToDownload.length} chapter(s)...`);
           totalDownloads += chaptersToDownload.length;
 
-        // Queue all downloads
+          // Queue all downloads
           for (const chapter of chaptersToDownload) {
             try {
               ServiceManager.manager.addTask({
@@ -166,7 +166,7 @@ export const useTranslateBatch = () => {
             } catch (error) {
               console.error('Error queueing chapter download:', error);
             }
-
+          }
 
           // Wait for downloads to complete using our new callback mechanism
           let downloadProgress = 0;
@@ -197,7 +197,7 @@ export const useTranslateBatch = () => {
           try {
             const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
 
-          // Double-check file exists even after download attempts
+            // Double-check file exists even after download attempts
             if (!(await FileManager.exists(filePath))) {
               console.warn(
                 `Chapter ${chapter.id} not available for translation, skipping`,
@@ -212,8 +212,7 @@ export const useTranslateBatch = () => {
               continue;
             }
 
-
-          const translationResult = await translateText(
+            const translationResult = await translateText(
               apiKey,
               chapterContent,
               model,
@@ -245,7 +244,7 @@ export const useTranslateBatch = () => {
 
       return totalTranslated;
     },
-    [apiKey, model, defaultInstruction],
+    [apiKey, model, defaultInstruction]
   );
 
   return { translateChapters };

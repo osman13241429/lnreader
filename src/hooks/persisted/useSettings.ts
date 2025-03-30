@@ -215,7 +215,8 @@ export const initialChapterReaderSettings: ChapterReaderSettings = {
 
 export const initialTranslationSettings: TranslationSettings = {
   apiKey: '',
-  defaultInstruction: 'Translate this chapter to English, keep the style of the chapter, and return only the translated chapter without any additional text.',
+  defaultInstruction:
+    'Translate this chapter to English, keep the style of the chapter, and return only the translated chapter without any additional text.',
   model: 'anthropic/claude-3-haiku-20240307',
   autoTranslate: false,
 };

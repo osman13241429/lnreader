@@ -19,8 +19,10 @@ const TranslationsSettings = () => {
       <Divider style={styles.divider} />
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{getString('translation.options')}</Text>
-        <Button 
+        <Text style={styles.sectionTitle}>
+          {getString('translation.options')}
+        </Text>
+        <Button
           mode="outlined"
           style={styles.button}
           icon="translate"
@@ -69,4 +71,4 @@ const styles = {
   },
 };
 
-export default TranslationsSettings; 
+export default TranslationsSettings;
