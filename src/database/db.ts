@@ -35,7 +35,7 @@ export const createTables = () => {
     tx.executeSql(createRepositoryTableQuery);
     tx.executeSql(createTranslationTableQuery);
   });
-  
+
   // Run migrations
   migrateDatabase();
 };
@@ -46,29 +46,31 @@ export const createTables = () => {
 export const migrateDatabase = () => {
   // We'll only log the "Running database migrations" message when actual migrations happen
   let didRunMigration = false;
-  
+
   // Add hasTranslation column to Chapter table if it doesn't exist
   db.transaction(tx => {
     // First check if the column exists
     tx.executeSql(
-      "PRAGMA table_info(Chapter)",
+      'PRAGMA table_info(Chapter)',
       [],
       (_, { rows }) => {
         const columns = rows._array;
-        const hasTranslationExists = columns.some(col => col.name === 'hasTranslation');
-        
+        const hasTranslationExists = columns.some(
+          col => col.name === 'hasTranslation',
+        );
+
         if (!hasTranslationExists) {
           // Only log when actual migration happens
           console.log('Running database migrations...');
           didRunMigration = true;
-          
+
           console.log('Adding hasTranslation column to Chapter table');
           tx.executeSql(
             'ALTER TABLE Chapter ADD COLUMN hasTranslation INTEGER DEFAULT 0',
             [],
             () => {
               console.log('Successfully added hasTranslation column');
-              
+
               // Update existing translations if any
               tx.executeSql(
                 `UPDATE Chapter SET hasTranslation = 1 
@@ -78,26 +80,26 @@ export const migrateDatabase = () => {
                 (_, error) => {
                   console.error('Error updating translations:', error);
                   return false;
-                }
+                },
               );
             },
             (_, error) => {
               console.error('Error adding hasTranslation column:', error);
               return false;
-            }
+            },
           );
         }
       },
       (_, error) => {
         console.error('Error checking for hasTranslation column:', error);
         return false;
-      }
+      },
     );
   });
-  
+
   // Add more migrations here in the future
   // Each should set didRunMigration to true if they actually do something
-  
+
   return didRunMigration;
 };
 

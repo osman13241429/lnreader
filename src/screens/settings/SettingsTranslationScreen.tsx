@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { ScrollView, View, ActivityIndicator, Alert, Linking, StyleSheet } from 'react-native';
+import {
+  ScrollView,
+  View,
+  ActivityIndicator,
+  Alert,
+  Linking,
+  StyleSheet,
+} from 'react-native';
 
 import { Appbar, Button, List } from '@components';
 import { useTheme } from '@hooks/persisted';
@@ -8,7 +15,13 @@ import { useTranslationSettings } from '@hooks/persisted/useSettings';
 import SettingSwitch from './components/SettingSwitch';
 import ModelDropdown from './components/ModelDropdown';
 import { getString } from '@strings/translations';
-import { TextInput, Text, Divider, Card, TouchableRipple } from 'react-native-paper';
+import {
+  TextInput,
+  Text,
+  Divider,
+  Card,
+  TouchableRipple,
+} from 'react-native-paper';
 import { deleteAllTranslations } from '@database/queries/TranslationQueries';
 import { showToast } from '@utils/showToast';
 import { testConnection } from '@services/translation/TranslationService';
@@ -17,12 +30,12 @@ import { fixTranslationColumn } from '@services/migration/DatabaseMigration';
 
 const TranslationSettings = ({ navigation }) => {
   const theme = useTheme();
-  const { 
-    apiKey, 
-    defaultInstruction, 
-    model, 
+  const {
+    apiKey,
+    defaultInstruction,
+    model,
     autoTranslate,
-    setTranslationSettings 
+    setTranslationSettings,
   } = useTranslationSettings();
 
   const [apiKeyInput, setApiKeyInput] = useState(apiKey);
@@ -42,7 +55,11 @@ const TranslationSettings = ({ navigation }) => {
       });
       showToast(getString('translation.settingsSaved'));
     } catch (error) {
-      showToast(`${getString('common.error')}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(
+        `${getString('common.error')}: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
     } finally {
       setIsSaving(false);
     }
@@ -52,15 +69,21 @@ const TranslationSettings = ({ navigation }) => {
     try {
       setIsTesting(true);
       const result = await testConnection(apiKeyInput, modelInput);
-      
+
       // Show result in an alert for better visibility
       Alert.alert(
-        result.success ? 'Connection Test Successful' : 'Connection Test Failed',
+        result.success
+          ? 'Connection Test Successful'
+          : 'Connection Test Failed',
         result.message,
-        [{ text: 'OK' }]
+        [{ text: 'OK' }],
       );
     } catch (error) {
-      showToast(`Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(
+        `Test failed: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
     } finally {
       setIsTesting(false);
     }
@@ -71,7 +94,11 @@ const TranslationSettings = ({ navigation }) => {
       setIsFixingDb(true);
       await fixTranslationColumn();
     } catch (error) {
-      showToast(`Database fix failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showToast(
+        `Database fix failed: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
     } finally {
       setIsFixingDb(false);
     }
@@ -86,7 +113,7 @@ const TranslationSettings = ({ navigation }) => {
     }
   };
 
-  const setRecommendedModel = (modelId) => {
+  const setRecommendedModel = modelId => {
     setModelInput(modelId);
     showToast(`Model set to ${modelId}`);
   };
@@ -111,7 +138,7 @@ const TranslationSettings = ({ navigation }) => {
           <List.SubHeader theme={theme}>
             {getString('translation.apiSettings')}
           </List.SubHeader>
-          
+
           <Card style={styles.card}>
             <Card.Content>
               <Text style={{ color: theme.onSurface, marginBottom: 8 }}>
@@ -127,7 +154,7 @@ const TranslationSettings = ({ navigation }) => {
               </TouchableRipple>
             </Card.Content>
           </Card>
-          
+
           <TextInput
             label={getString('translation.apiKey')}
             value={apiKeyInput}
@@ -136,8 +163,14 @@ const TranslationSettings = ({ navigation }) => {
             theme={{ colors: { primary: theme.primary } }}
             secureTextEntry
           />
-          
-          <Text style={{ marginHorizontal: 16, marginTop: 16, color: theme.onSurface }}>
+
+          <Text
+            style={{
+              marginHorizontal: 16,
+              marginTop: 16,
+              color: theme.onSurface,
+            }}
+          >
             {getString('translation.model')}
           </Text>
           <ModelDropdown
@@ -145,12 +178,14 @@ const TranslationSettings = ({ navigation }) => {
             onChange={setModelInput}
             theme={theme}
           />
-          
+
           <Card style={{ ...styles.card, marginBottom: 16 }}>
             <Card.Title title="Recommended Models" />
             <Card.Content>
-              <TouchableRipple 
-                onPress={() => setRecommendedModel('anthropic/claude-3-haiku-20240307')}
+              <TouchableRipple
+                onPress={() =>
+                  setRecommendedModel('anthropic/claude-3-haiku-20240307')
+                }
                 style={styles.modelOption}
               >
                 <View>
@@ -162,11 +197,13 @@ const TranslationSettings = ({ navigation }) => {
                   </Text>
                 </View>
               </TouchableRipple>
-              
+
               <Divider style={styles.divider} />
-              
-              <TouchableRipple 
-                onPress={() => setRecommendedModel('anthropic/claude-3-sonnet-20240229')}
+
+              <TouchableRipple
+                onPress={() =>
+                  setRecommendedModel('anthropic/claude-3-sonnet-20240229')
+                }
                 style={styles.modelOption}
               >
                 <View>
@@ -178,10 +215,10 @@ const TranslationSettings = ({ navigation }) => {
                   </Text>
                 </View>
               </TouchableRipple>
-              
+
               <Divider style={styles.divider} />
-              
-              <TouchableRipple 
+
+              <TouchableRipple
                 onPress={() => setRecommendedModel('openai/gpt-3.5-turbo')}
                 style={styles.modelOption}
               >
@@ -194,10 +231,17 @@ const TranslationSettings = ({ navigation }) => {
                   </Text>
                 </View>
               </TouchableRipple>
-              
-              <TouchableRipple onPress={openModelDocs} style={{ marginTop: 16 }}>
+
+              <TouchableRipple
+                onPress={openModelDocs}
+                style={{ marginTop: 16 }}
+              >
                 <View style={styles.link}>
-                  <Icon name="information-outline" size={16} color={theme.primary} />
+                  <Icon
+                    name="information-outline"
+                    size={16}
+                    color={theme.primary}
+                  />
                   <Text style={{ color: theme.primary, marginLeft: 8 }}>
                     Learn more about available models
                   </Text>
@@ -205,7 +249,7 @@ const TranslationSettings = ({ navigation }) => {
               </TouchableRipple>
             </Card.Content>
           </Card>
-          
+
           <TextInput
             label={getString('translation.instruction')}
             value={instructionInput}
@@ -216,7 +260,13 @@ const TranslationSettings = ({ navigation }) => {
             numberOfLines={4}
           />
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginHorizontal: 16 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              marginHorizontal: 16,
+            }}
+          >
             <Button
               title={isSaving ? '...' : getString('translation.saveSettings')}
               onPress={saveSettings}
@@ -240,16 +290,18 @@ const TranslationSettings = ({ navigation }) => {
               style={{ marginTop: 16, marginBottom: 16 }}
             />
           )}
-          
-          <Text 
-            style={{ 
-              marginHorizontal: 16, 
-              marginTop: 8, 
+
+          <Text
+            style={{
+              marginHorizontal: 16,
+              marginTop: 8,
               color: theme.onSurfaceVariant,
               fontSize: 12,
             }}
           >
-            Note: The "No endpoints found matching your data policy" error usually means the selected model is not available with your current OpenRouter API key or plan.
+            Note: The "No endpoints found matching your data policy" error
+            usually means the selected model is not available with your current
+            OpenRouter API key or plan.
           </Text>
         </List.Section>
 
@@ -260,7 +312,9 @@ const TranslationSettings = ({ navigation }) => {
           <SettingSwitch
             label={getString('translation.autoTranslate')}
             value={autoTranslate}
-            onPress={() => setTranslationSettings({ autoTranslate: !autoTranslate })}
+            onPress={() =>
+              setTranslationSettings({ autoTranslate: !autoTranslate })
+            }
             theme={theme}
           />
           <Button
@@ -280,24 +334,23 @@ const TranslationSettings = ({ navigation }) => {
         </List.Section>
 
         <List.Section>
-          <List.SubHeader theme={theme}>
-            Troubleshooting
-          </List.SubHeader>
+          <List.SubHeader theme={theme}>Troubleshooting</List.SubHeader>
           <Card style={styles.card}>
             <Card.Content>
               <Text style={{ color: theme.onSurface, marginBottom: 12 }}>
-                If you see "no such column: hasTranslation" errors, use this button to fix the database:
+                If you see "no such column: hasTranslation" errors, use this
+                button to fix the database:
               </Text>
               <Button
-                title={isFixingDb ? "Fixing Database..." : "Fix Database"}
+                title={isFixingDb ? 'Fixing Database...' : 'Fix Database'}
                 onPress={handleFixDatabase}
                 mode="contained"
                 color={theme.primary}
                 disabled={isFixingDb}
               />
               {isFixingDb && (
-                <ActivityIndicator 
-                  size="small" 
+                <ActivityIndicator
+                  size="small"
                   color={theme.primary}
                   style={{ marginTop: 12 }}
                 />
@@ -316,7 +369,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   link: {
-    flexDirection: 'row', 
+    flexDirection: 'row',
     alignItems: 'center',
   },
   modelOption: {
@@ -324,7 +377,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     marginVertical: 8,
-  }
+  },
 });
 
-export default TranslationSettings; 
+export default TranslationSettings;
