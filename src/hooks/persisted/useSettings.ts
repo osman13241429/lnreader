@@ -90,6 +90,11 @@ export interface ChapterGeneralSettings {
   bionicReading: boolean;
   tapToScroll: boolean;
   TTSEnable: boolean;
+  TTSAutoNextChapter: boolean;
+  TTSSleepTimer: boolean;
+  TTSSleepTimerDuration: number;
+  TTSReadMultipleChapters: boolean;
+  TTSReadChaptersCount: number;
 }
 
 export interface ReaderTheme {
@@ -190,6 +195,11 @@ export const initialChapterGeneralSettings: ChapterGeneralSettings = {
   bionicReading: false,
   tapToScroll: false,
   TTSEnable: false,
+  TTSAutoNextChapter: false,
+  TTSSleepTimer: false,
+  TTSSleepTimerDuration: 30,
+  TTSReadMultipleChapters: false,
+  TTSReadChaptersCount: 1,
 };
 
 export const initialChapterReaderSettings: ChapterReaderSettings = {
