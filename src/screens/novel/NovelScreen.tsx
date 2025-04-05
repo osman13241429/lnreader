@@ -8,7 +8,6 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Share,
-  Dimensions,
 } from 'react-native';
 import { Drawer } from 'react-native-drawer-layout';
 import { FlashList } from '@shopify/flash-list';
