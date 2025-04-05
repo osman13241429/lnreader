@@ -4,14 +4,11 @@ import ChooseEpubLocationModal from './ChooseEpubLocationModal';
 import { StatusBar } from 'react-native';
 import { ThemeColors } from '@theme/types';
 
-import EpubBuilder from '@cd-z/react-native-epub-creator';
 import { ChapterInfo, NovelInfo } from '@database/types';
-
 import { useChapterReaderSettings } from '@hooks/persisted';
 import { useBoolean } from '@hooks/index';
 import { showToast } from '@utils/showToast';
-import { NOVEL_STORAGE } from '@utils/Storages';
-import FileManager from '@native/FileManager';
+import { createNovelEpub } from '@utils/epubUtils';
 
 interface EpubIconButtonProps {
   theme: ThemeColors;
@@ -30,11 +27,8 @@ const EpubIconButton: React.FC<EpubIconButtonProps> = ({
     setFalse: hideModal,
   } = useBoolean(false);
   const readerSettings = useChapterReaderSettings();
-  const {
-    epubUseAppTheme = false,
-    epubUseCustomCSS = false,
-    epubUseCustomJS = false,
-  } = useChapterReaderSettings();
+  const { epubUseAppTheme = false, epubUseCustomCSS = false } =
+    useChapterReaderSettings();
 
   const epubStyle = useMemo(
     () =>
@@ -44,7 +38,7 @@ const EpubIconButton: React.FC<EpubIconButtonProps> = ({
               html {
                 scroll-behavior: smooth;
                 overflow-x: hidden;
-                padding-top: ${StatusBar.currentHeight};
+                padding-top: ${StatusBar.currentHeight}px;
                 word-wrap: break-word;
               }
               body {
@@ -77,89 +71,36 @@ const EpubIconButton: React.FC<EpubIconButtonProps> = ({
         epubUseCustomCSS
           ? readerSettings.customCSS
               .replace(
-                RegExp(`\#sourceId-${novel.pluginId}\\s*\\{`, 'g'),
+                RegExp(`#sourceId-${novel.pluginId}\\s*\\{`, 'g'),
                 'body {',
               )
               .replace(
-                RegExp(`\#sourceId-${novel.pluginId}[^\.\#A-Z]*`, 'gi'),
+                RegExp(`#sourceId-${novel.pluginId}[^\\.\#A-Z]*`, 'gi'),
                 '',
               )
           : ''
       }`,
-    [novel, epubUseAppTheme, readerSettings, epubUseCustomCSS],
+    [novel, epubUseAppTheme, readerSettings, epubUseCustomCSS, theme.primary],
   );
 
-  const epubJS = useMemo(
-    () =>
-      `
-        let novelName = "${novel.name}";
-        let chapterName = "";
-        let sourceId =${novel.pluginId};
-        let chapterId ="";
-        let novelId =${novel.id};
-        let html = document.querySelector("chapter").innerHTML;
-          
-        ${readerSettings.customJS}
-        `,
-    [novel, readerSettings],
-  );
-
-  const createEpub = async (uri: string) => {
-    var epub = new EpubBuilder(
-      {
-        title: novel.name,
-        fileName: novel.name.replace(/\s/g, ''),
-        language: 'en',
-        cover: novel.cover,
-        description: novel.summary,
-        author: novel.author,
-        bookId: novel.pluginId.toString(),
-        stylesheet: epubStyle || undefined,
-        js: epubUseCustomJS ? epubJS : undefined,
-      },
-      uri,
-    );
-    console.log({
-      title: novel.name,
-      fileName: novel.name.replace(/\s/g, ''),
-      language: 'en',
-      cover: novel.cover,
-      description: novel.summary,
-      author: novel.author,
-      bookId: novel.pluginId.toString(),
-      stylesheet: epubStyle || undefined,
-      js: epubUseCustomJS ? epubJS : undefined,
-    });
+  const createEpub = async (outputPath: string) => {
     try {
-      await epub.prepare();
-      for (let i = 0; i < chapters.length; i++) {
-        const chapter = chapters[i];
-        const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
-        if (await FileManager.exists(filePath)) {
-          const downloaded = FileManager.readFile(filePath);
-          console.log({
-            title:
-              chapter.name?.trim() ?? 'Chapter ' + (chapter.chapterNumber || i),
-            fileName: 'Chapter' + i,
-            htmlBody: `<chapter data-novel-id='${novel.pluginId}' data-chapter-id='${chapter.id}'>${downloaded}</chapter>`,
-          });
+      showToast('Creating EPUB... This may take a while.');
 
-          await epub.addChapter({
-            title:
-              chapter.name?.trim() ?? 'Chapter ' + (chapter.chapterNumber || i),
-            fileName: 'Chapter' + i,
-            htmlBody: `<chapter data-novel-id='${novel.pluginId}' data-chapter-id='${chapter.id}'>${downloaded}</chapter>`,
-          });
-        }
-      }
-      var epubFilePath = await epub.save();
-      showToast('Epub file saved at: ' + epubFilePath);
+      // Use the new standardized EPUB creation function
+      await createNovelEpub(novel, chapters, outputPath, {
+        embedImages: true,
+        stylesheet: epubStyle || undefined,
+      });
     } catch (error) {
-      console.error(error);
-      showToast('Cannot create because: ' + error);
-      await epub.discardChanges();
+      showToast(
+        `Failed to create EPUB: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
     }
   };
+
   return (
     <>
       <IconButton

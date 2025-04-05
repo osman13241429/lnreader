@@ -141,7 +141,7 @@ export const getAllTranslations = async (): Promise<
   return new Promise((resolve, reject) => {
     db.transaction(tx => {
       tx.executeSql(
-        `SELECT t.*, c.name as chapterName, n.name as novelName, n.cover as novelCover 
+        `SELECT t.*, c.name as chapterName, c.path as chapterPath, n.name as novelName, n.cover as novelCover, n.pluginId as novelPluginId
          FROM Translation t
          JOIN Chapter c ON t.chapterId = c.id
          JOIN Novel n ON c.novelId = n.id
@@ -214,6 +214,7 @@ export const getAllTranslationsByNovel = async (): Promise<
         novelId,
         novelTitle: novelName,
         novelCover,
+        novelPluginId: firstWithId?.novelPluginId || '',
         chapters: novelTranslations.map(t => ({
           id: t.id,
           chapterId: t.chapterId,
@@ -221,6 +222,8 @@ export const getAllTranslationsByNovel = async (): Promise<
           chapterTitle: t.chapterName || 'Unknown Chapter',
           novelTitle: t.novelName || 'Unknown Novel',
           novelCover: t.novelCover,
+          novelPluginId: t.novelPluginId,
+          chapterPath: t.chapterPath,
           content: t.content,
           previewText: t.previewText,
           model: t.model,

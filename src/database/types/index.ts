@@ -108,6 +108,8 @@ export interface TranslationInfo {
   chapterTitle: string;
   novelTitle: string;
   novelCover?: string;
+  novelPluginId: string;
+  chapterPath: string;
   content: string;
   previewText: string;
   model: string;
@@ -118,5 +120,6 @@ export interface NovelGroupedTranslations {
   novelId: number;
   novelTitle: string;
   novelCover?: string;
+  novelPluginId: string;
   chapters: TranslationInfo[];
 }

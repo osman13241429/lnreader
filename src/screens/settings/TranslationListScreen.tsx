@@ -29,6 +29,8 @@ import { getString } from '@strings/translations';
 import { showToast } from '@utils/showToast';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import FileManager from '@native/FileManager';
+import { processHtmlContentForImages } from '@utils/htmlUtils';
+import { createTranslationEpub } from '@utils/epubUtils';
 
 type TranslationListScreenProps = {
   navigation: any;
@@ -54,6 +56,7 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
   const [exportFormat, setExportFormat] = useState<ExportFormat>('txt');
   const [showFormatOptions, setShowFormatOptions] = useState(false);
   const [exportMode, setExportMode] = useState<'single' | 'combined'>('single');
+  const [embedImages, setEmbedImages] = useState(false);
 
   // Safe version of getString that handles missing translations
   const safeGetString = (key: string, options?: any) => {
@@ -277,59 +280,55 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
             .replace(/&nbsp;&nbsp;/g, '  ') // Convert non-breaking spaces back to regular spaces
             .replace(/&nbsp;/g, ' ')
             .replace(/<[^>]*>/g, ''); // Remove any other HTML tags
+
+          // Write to file
+          await FileManager.writeFile(exportFile, content);
+          showToast(`Exported to ${exportFile}`);
+          return exportFile;
         } else if (exportFormat === 'html') {
           exportFile = `${novelDir}/${sanitizedChapterName}-${timestamp}.html`;
-          // Create a simple HTML document
-          content = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>${novelName} - ${chapterName}</title>
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 20px; }
-    h1 { text-align: center; }
-    .content { max-width: 800px; margin: 0 auto; }
-  </style>
-</head>
-<body>
-  <h1>${novelName} - ${chapterName}</h1>
-  <div class="content">
-    ${translation.content}
-  </div>
-</body>
-</html>`;
-        } else {
-          // epub - simplified version
-          exportFile = `${novelDir}/${sanitizedChapterName}-${timestamp}.epub`;
-          // For a real EPUB implementation, more work would be needed
-          // This is just a placeholder HTML with EPUB extension
-          content = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>${novelName} - ${chapterName}</title>
-  <style>
-    body { font-family: serif; line-height: 1.6; margin: 20px; }
-    h1 { text-align: center; }
-    .content { max-width: 800px; margin: 0 auto; }
-  </style>
-</head>
-<body>
-  <h1>${novelName} - ${chapterName}</h1>
-  <div class="content">
-    ${translation.content}
-  </div>
-</body>
-</html>`;
-          showToast(
-            'Note: This is a simplified EPUB export (HTML with EPUB extension)',
+
+          let processedContent = translation.content;
+          if (embedImages) {
+            showToast('Embedding images... This may take a while.');
+            processedContent = await processHtmlContentForImages(
+              translation.content,
+              translation.chapterPath,
+              translation.novelPluginId,
+              embedImages,
+            );
+          }
+
+          // Create a simple HTML document using processed content
+          content = `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>${novelName} - ${chapterName}</title>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 20px; }\n    h1 { text-align: center; }\n    .content { max-width: 800px; margin: 0 auto; }\n    img { max-width: 100%; height: auto; } /* Basic image styling */\n  </style>\n</head>\n<body>\n  <h1>${novelName} - ${chapterName}</h1>\n  <div class="content">\n    ${processedContent}\n  </div>\n</body>\n</html>`;
+
+          // Write to file
+          await FileManager.writeFile(exportFile, content);
+          showToast(`Exported to ${exportFile}`);
+          return exportFile;
+        } else if (exportFormat === 'epub') {
+          // Handle EPUB export using the new epubUtils
+          const epubFileName = `${sanitizedChapterName}-${timestamp}.epub`;
+          exportFile = `${novelDir}/${epubFileName}`;
+
+          // Create a single-item array for the createTranslationEpub function
+          const result = await createTranslationEpub(
+            [translation],
+            novelName,
+            exportFile,
+            {
+              embedImages: embedImages,
+            },
           );
+
+          if (result) {
+            showToast(`Exported EPUB: ${epubFileName}`);
+            return exportFile;
+          }
+          return null;
         }
 
-        // Write to file
-        await FileManager.writeFile(exportFile, content);
-        showToast(`Exported to ${novelDir}/${sanitizedChapterName}`);
-        return exportFile;
+        return null;
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
@@ -339,7 +338,7 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
         return null;
       }
     },
-    [safeGetString, exportFormat],
+    [safeGetString, exportFormat, embedImages],
   );
 
   const exportSelected = useCallback(async () => {
@@ -554,6 +553,19 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
         style={styles.segmentedButtons}
       />
 
+      <Text
+        style={[styles.optionLabel, { color: theme.onSurface, marginTop: 12 }]}
+      >
+        Embed Images:
+      </Text>
+      <Checkbox.Item
+        label="Embed images (larger file size)"
+        labelStyle={{ color: theme.onSurface, fontSize: 14 }}
+        status={embedImages ? 'checked' : 'unchecked'}
+        onPress={() => setEmbedImages(!embedImages)}
+        style={styles.checkbox}
+      />
+
       <View style={styles.formatButtonsRow}>
         <TouchableOpacity
           style={[styles.formatButton, { backgroundColor: theme.error }]}
@@ -607,11 +619,30 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
           const bMatch = b.chapterTitle?.match(/\d+/);
 
           if (aMatch && bMatch) {
-            return parseInt(aMatch[0]) - parseInt(bMatch[0]);
+            return parseInt(aMatch[0], 10) - parseInt(bMatch[0], 10);
           }
 
           return a.chapterTitle?.localeCompare(b.chapterTitle || '') || 0;
         });
+
+        // Process chapters for image embedding if requested (only for HTML/EPUB)
+        let processedChapters = sortedChapters;
+        if (exportFormat === 'html' && embedImages && novel.novelPluginId) {
+          showToast(
+            'Embedding images for combined export... This may take a while.',
+          );
+          processedChapters = await Promise.all(
+            sortedChapters.map(async chapter => ({
+              ...chapter,
+              content: await processHtmlContentForImages(
+                chapter.content,
+                chapter.chapterPath,
+                novel.novelPluginId,
+                embedImages,
+              ),
+            })),
+          );
+        }
 
         if (exportFormat === 'txt') {
           // For TXT format, concatenate all chapters with headers
@@ -619,13 +650,13 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
 
           // Create a simple table of contents
           combinedContent += 'TABLE OF CONTENTS\n\n';
-          sortedChapters.forEach((chapter, index) => {
+          processedChapters.forEach((chapter, index) => {
             combinedContent += `${index + 1}. ${chapter.chapterTitle}\n`;
           });
           combinedContent += '\n\n';
 
           // Add each chapter with a divider
-          sortedChapters.forEach((chapter, index) => {
+          processedChapters.forEach((chapter, index) => {
             // Process the content to strip HTML
             const processedContent = chapter.content
               .replace(/<br\s*\/?>/gi, '\n') // Convert <br> tags to newlines
@@ -648,13 +679,13 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
           await FileManager.writeFile(fullPath, combinedContent);
           showToast(`Combined export successful: ${filename}`);
           return true;
-        } else if (exportFormat === 'html' || exportFormat === 'epub') {
-          // For HTML and EPUB, create a styled document with chapters
+        } else if (exportFormat === 'html') {
+          // For HTML, create a styled document with chapters
           let tableOfContents = '';
           let chapterContents = '';
 
-          // Process each chapter and build the content
-          sortedChapters.forEach((chapter, index) => {
+          // Process each PROCESSED chapter and build the content
+          processedChapters.forEach((chapter, index) => {
             const chapterNum = index + 1;
             const anchorId = `chapter-${chapterNum}`;
 
@@ -774,24 +805,34 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
 </html>`;
 
           // Determine filename based on format
-          let filename, fullPath;
-
-          if (exportFormat === 'html') {
-            filename = `${sanitizedNovelName}-combined-${timestamp}.html`;
-          } else {
-            // EPUB
-            filename = `${sanitizedNovelName}-combined-${timestamp}.epub`;
-            showToast(
-              'Note: This is a simplified EPUB export (HTML with EPUB extension)',
-            );
-          }
-
-          fullPath = `${novelDir}/${filename}`;
+          const filename = `${sanitizedNovelName}-combined-${timestamp}.html`;
+          const fullPath = `${novelDir}/${filename}`;
 
           // Write the file
           await FileManager.writeFile(fullPath, htmlContent);
           showToast(`Combined export successful: ${filename}`);
           return true;
+        } else if (exportFormat === 'epub') {
+          // EPUB Export Logic using the new epubUtils
+          const epubFileName = `${sanitizedNovelName}-combined-${timestamp}.epub`;
+          const epubOutputPath = `${novelDir}/${epubFileName}`;
+
+          // Use the createTranslationEpub utility function
+          const result = await createTranslationEpub(
+            chapters,
+            novelName,
+            epubOutputPath,
+            {
+              coverPath: novel.novelCover,
+              embedImages: embedImages,
+            },
+          );
+
+          if (result) {
+            showToast(`Combined EPUB export successful: ${epubFileName}`);
+            return true;
+          }
+          return false;
         }
 
         return false;
@@ -804,7 +845,7 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
         return false;
       }
     },
-    [exportFormat],
+    [exportFormat, embedImages],
   );
 
   // Add handler for combined export
@@ -838,6 +879,7 @@ const TranslationListScreen = ({ navigation }: TranslationListScreenProps) => {
                 novelId,
                 novelTitle: chapter.novelTitle || 'Unknown Novel',
                 novelCover: chapter.novelCover,
+                novelPluginId: chapter.novelPluginId || '',
                 chapters: [],
               },
               chapters: [],
@@ -1058,7 +1100,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
   checkbox: {
-    marginRight: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
   },
   novelCheckbox: {
     marginRight: 8,
