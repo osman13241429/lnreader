@@ -5,7 +5,7 @@ import { getString } from '../../utils/strings';
 
 const TranslationsSettings = () => {
   const navigation = useNavigation();
-  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [_confirmDeleteAll, _setConfirmDeleteAll] = useState(false);
 
   const handleDeleteAll = () => {
     // Implement the logic to delete all translations

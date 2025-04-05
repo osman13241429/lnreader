@@ -1,4 +1,4 @@
-import { IconButtonV2, List } from '@components';
+import { IconButtonV2, List, SwitchItem } from '@components';
 import {
   useChapterGeneralSettings,
   useChapterReaderSettings,
@@ -24,13 +24,22 @@ export default function TextToSpeechSettings() {
   }, []);
 
   const { tts, setChapterReaderSettings } = useChapterReaderSettings();
-  const { TTSEnable = true, setChapterGeneralSettings } =
-    useChapterGeneralSettings();
+  const {
+    TTSEnable = true,
+    TTSAutoNextChapter = false,
+    TTSSleepTimer = false,
+    TTSSleepTimerDuration = 30,
+    TTSReadMultipleChapters = false,
+    TTSReadChaptersCount = 1,
+    setChapterGeneralSettings,
+  } = useChapterGeneralSettings();
+
   const {
     value: voiceModalVisible,
     setTrue: showVoiceModal,
     setFalse: hideVoiceModal,
   } = useBoolean();
+
   return (
     <>
       <View style={styles.row}>
@@ -103,6 +112,111 @@ export default function TextToSpeechSettings() {
               }
             />
           </List.Section>
+
+          {/* Auto Next Chapter Settings */}
+          <List.Section>
+            <List.SubHeader theme={theme}>
+              Auto Chapter Navigation
+            </List.SubHeader>
+            <SwitchItem
+              label={'Auto load next chapter'}
+              description={
+                'Automatically load the next chapter when TTS finishes reading'
+              }
+              theme={theme}
+              value={TTSAutoNextChapter}
+              onPress={() => {
+                setChapterGeneralSettings({
+                  TTSAutoNextChapter: !TTSAutoNextChapter,
+                });
+              }}
+            />
+
+            {/* Read Multiple Chapters */}
+            <SwitchItem
+              label={'Read multiple chapters'}
+              description={`Stop after reading ${TTSReadChaptersCount} chapters`}
+              theme={theme}
+              value={TTSReadMultipleChapters}
+              onPress={() => {
+                setChapterGeneralSettings({
+                  TTSReadMultipleChapters: !TTSReadMultipleChapters,
+                });
+              }}
+            />
+
+            {TTSReadMultipleChapters && (
+              <>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: theme.onSurface, marginTop: 8 },
+                  ]}
+                >
+                  Number of chapters to read
+                </Text>
+                <Slider
+                  style={styles.slider}
+                  value={TTSReadChaptersCount}
+                  minimumValue={1}
+                  maximumValue={10}
+                  step={1}
+                  minimumTrackTintColor={theme.primary}
+                  maximumTrackTintColor={theme.surfaceVariant}
+                  thumbTintColor={theme.primary}
+                  onSlidingComplete={value =>
+                    setChapterGeneralSettings({ TTSReadChaptersCount: value })
+                  }
+                />
+                <Text style={[styles.valueLabel, { color: theme.onSurface }]}>
+                  {TTSReadChaptersCount}{' '}
+                  {TTSReadChaptersCount === 1 ? 'chapter' : 'chapters'}
+                </Text>
+              </>
+            )}
+
+            {/* Sleep Timer */}
+            <SwitchItem
+              label={'Sleep timer'}
+              description={`Stop TTS after ${TTSSleepTimerDuration} minutes`}
+              theme={theme}
+              value={TTSSleepTimer}
+              onPress={() => {
+                setChapterGeneralSettings({
+                  TTSSleepTimer: !TTSSleepTimer,
+                });
+              }}
+            />
+
+            {TTSSleepTimer && (
+              <>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: theme.onSurface, marginTop: 8 },
+                  ]}
+                >
+                  Sleep timer duration (minutes)
+                </Text>
+                <Slider
+                  style={styles.slider}
+                  value={TTSSleepTimerDuration}
+                  minimumValue={1}
+                  maximumValue={120}
+                  step={1}
+                  minimumTrackTintColor={theme.primary}
+                  maximumTrackTintColor={theme.surfaceVariant}
+                  thumbTintColor={theme.primary}
+                  onSlidingComplete={value =>
+                    setChapterGeneralSettings({ TTSSleepTimerDuration: value })
+                  }
+                />
+                <Text style={[styles.valueLabel, { color: theme.onSurface }]}>
+                  {TTSSleepTimerDuration} minutes
+                </Text>
+              </>
+            )}
+          </List.Section>
         </>
       ) : null}
       <View style={{ height: 16 }} />
@@ -126,6 +240,11 @@ const styles = StyleSheet.create({
   label: {
     textAlign: 'center',
     fontSize: 16,
+  },
+  valueLabel: {
+    textAlign: 'center',
+    fontSize: 14,
+    marginBottom: 8,
   },
   slider: {
     flex: 1,

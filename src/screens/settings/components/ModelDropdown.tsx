@@ -15,7 +15,6 @@ import {
 } from '@services/translation/TranslationService';
 import { ThemeColors } from '@theme/types';
 import { showToast } from '@utils/showToast';
-import { getString } from '@strings/translations';
 
 interface ModelDropdownProps {
   value: string;

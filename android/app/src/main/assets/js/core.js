@@ -207,10 +207,26 @@ window.tts = new (function () {
         this.reading = true;
         this.speak();
       } else {
+        // We've reached the end of the chapter
         this.reading = false;
         this.stop();
-        document.getElementById('TTS-Controller').firstElementChild.innerHTML =
-          volumnIcon;
+
+        // Reset current element to the start for next time
+        this.currentElement = reader.chapterElement;
+        this.prevElement = null;
+        this.started = false;
+
+        // Update UI
+        const ttsController = document.getElementById('TTS-Controller');
+        if (ttsController) {
+          ttsController.firstElementChild.innerHTML = volumnIcon;
+        }
+
+        console.log(
+          '[TTS] Reached end of chapter - sending chapter complete event',
+        );
+        // Notify the React Native side that TTS has finished reading the chapter
+        reader.post({ type: 'tts-chapter-complete', data: 'chapter_finished' });
       }
     } catch (e) {
       alert(e);
@@ -219,7 +235,12 @@ window.tts = new (function () {
 
   this.start = element => {
     this.stop();
+    // Always reset the element state before starting
     this.currentElement = element ?? reader.chapterElement;
+    this.prevElement = null;
+    this.started = false;
+    this.reading = false;
+    // Start TTS
     this.next();
   };
 
@@ -242,8 +263,12 @@ window.tts = new (function () {
     reader.post({ type: 'stop-speak' });
   };
 
-  this.stop = () => {
-    reader.post({ type: 'stop-speak' });
+  this.stop = reason => {
+    if (reason) {
+      reader.post({ type: 'stop-speak', data: reason });
+    } else {
+      reader.post({ type: 'stop-speak' });
+    }
     this.currentElement?.classList?.remove('highlight');
     this.prevElement = null;
     this.currentElement = reader.chapterElement;

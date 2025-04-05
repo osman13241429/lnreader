@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  createStackNavigator,
-  StackScreenProps,
-  CardStyleInterpolators,
-} from '@react-navigation/stack';
+import { createStackNavigator } from '@react-navigation/stack';
 
 // Screens
 import About from '../screens/more/About';

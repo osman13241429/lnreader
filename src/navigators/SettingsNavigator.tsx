@@ -1,36 +1,28 @@
-import NovelUpdatesSettings from '@screens/settings/NovelUpdatesSettings';
+import React from 'react';
+import { createStackNavigator } from '@react-navigation/stack';
 import TranslationsSettings from '@screens/settings/TranslationsSettings';
-import WebviewSettings from '@screens/settings/WebviewSettings';
 import TranslationListScreen from '@screens/settings/TranslationListScreen';
+import SettingsTranslationScreen from '@screens/settings/SettingsTranslationScreen';
 
-function SettingsStack() {
+const Stack = createStackNavigator();
+
+const SettingsNavigator = () => {
   return (
-    <Stack.Navigator screenOptions={stackScreenOptions}>
-      <Stack.Screen
-        name="Settings"
-        component={SettingsScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="SettingsScreenContainer"
-        component={SettingsScreenContainer}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="ChromeReaderSettings"
-        component={ChromeReaderSettings}
-      />
+    <Stack.Navigator
+      initialRouteName="TranslationsSettings"
+      screenOptions={{ headerShown: false }}
+    >
       <Stack.Screen
         name="TranslationsSettings"
         component={TranslationsSettings}
       />
       <Stack.Screen name="TranslationList" component={TranslationListScreen} />
+      <Stack.Screen
+        name="SettingsTranslation"
+        component={SettingsTranslationScreen}
+      />
     </Stack.Navigator>
   );
-}
+};
 
-export default SettingsStack;
+export default SettingsNavigator;

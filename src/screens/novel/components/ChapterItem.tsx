@@ -44,17 +44,8 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
   isUpdateCard,
   novelName,
 }) => {
-  const {
-    id,
-    name,
-    unread,
-    releaseTime,
-    bookmark,
-    chapterNumber,
-    progress,
-    isDownloaded,
-    hasTranslation,
-  } = chapter;
+  const { id, name, releaseTime, chapterNumber, progress, hasTranslation } =
+    chapter;
   const {
     value: isMenuVisible,
     setTrue: showMenu,
@@ -77,14 +68,14 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
     >
       <View style={styles.row}>
         {left}
-        {bookmark ? <ChapterBookmarkButton theme={theme} /> : null}
+        {chapter.bookmark ? <ChapterBookmarkButton theme={theme} /> : null}
         <View style={{ flex: 1 }}>
           {isUpdateCard ? (
             <Text
               style={[
                 {
                   fontSize: 14,
-                  color: unread ? theme.onSurface : theme.outline,
+                  color: chapter.unread ? theme.onSurface : theme.outline,
                 },
               ]}
               numberOfLines={1}
@@ -99,7 +90,7 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
               alignItems: 'center',
             }}
           >
-            {unread ? (
+            {chapter.unread ? (
               <MaterialCommunityIcons
                 name="circle"
                 color={theme.primary}
@@ -112,9 +103,9 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
               style={[
                 {
                   fontSize: isUpdateCard ? 12 : 14,
-                  color: !unread
+                  color: !chapter.unread
                     ? theme.outline
-                    : bookmark
+                    : chapter.bookmark
                     ? theme.primary
                     : theme.onSurface,
                 },
@@ -146,9 +137,9 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
               <Text
                 style={[
                   {
-                    color: !unread
+                    color: !chapter.unread
                       ? theme.outline
-                      : bookmark
+                      : chapter.bookmark
                       ? theme.primary
                       : theme.onSurfaceVariant,
                     marginTop: 4,

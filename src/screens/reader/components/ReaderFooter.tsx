@@ -23,8 +23,6 @@ interface ChapterFooterProps {
   showTranslation?: boolean;
   toggleTranslation?: () => void;
   translateChapter?: () => void;
-  exportTranslation?: () => Promise<string | null | undefined>;
-  removeTranslation?: () => void;
   chapter?: ChapterInfo;
 }
 
@@ -41,8 +39,6 @@ const ChapterFooter = ({
   showTranslation = false,
   toggleTranslation = () => {},
   translateChapter = () => {},
-  exportTranslation = async () => '',
-  removeTranslation = () => {},
   chapter,
 }: ChapterFooterProps) => {
   const { novel } = useChapterContext();
@@ -127,7 +123,7 @@ const ChapterFooter = ({
               iconColor={showTranslation ? theme.primary : theme.onSurface}
             />
           </Pressable>
-        ) : chapter?.isDownloaded === 1 ? (
+        ) : chapter?.isDownloaded ? (
           <Pressable
             android_ripple={rippleConfig}
             style={styles.buttonStyles}

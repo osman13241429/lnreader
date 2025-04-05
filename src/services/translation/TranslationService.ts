@@ -1,5 +1,4 @@
 import { showToast } from '@utils/showToast';
-import { getString } from '@strings/translations';
 
 export interface TranslationResponse {
   content: string;
@@ -162,8 +161,6 @@ export const testConnection = async (
         errorData.error?.message || `Test failed: ${testResponse.statusText}`,
       );
     }
-
-    const data = await testResponse.json();
 
     return {
       success: true,
