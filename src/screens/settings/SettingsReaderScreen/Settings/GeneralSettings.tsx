@@ -29,7 +29,7 @@ const GeneralSettings: React.FC = () => {
     autoScrollOffset = null,
     bionicReading = false,
     tapToScroll = false,
-    disableDrawerSwipe = true,
+    disableDrawerSwipe = false,
     setChapterGeneralSettings,
   } = useChapterGeneralSettings();
 
@@ -99,7 +99,7 @@ const GeneralSettings: React.FC = () => {
       />
       <SettingSwitch
         label={getString('readerScreen.bottomSheet.disableDrawerSwipe')}
-        value={disableDrawerSwipe}
+        value={!disableDrawerSwipe}
         onPress={() =>
           setChapterGeneralSettings({ disableDrawerSwipe: !disableDrawerSwipe })
         }
