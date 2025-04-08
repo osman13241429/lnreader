@@ -38,9 +38,6 @@ export const useTranslateBatch = () => {
     while (pending.length > 0) {
       // Check if we've exceeded the maximum wait time
       if (Date.now() - startTime > maxWaitTimeMs) {
-        console.log(
-          `Exceeded maximum wait time (${maxWaitTimeMs}ms) for downloads`,
-        );
         return false;
       }
 
@@ -171,10 +168,9 @@ export const useTranslateBatch = () => {
 
           const allDownloaded = await waitForDownloadsToComplete(
             downloadFilePaths,
-            (completed, total) => {
+            (completed, _total) => {
               if (completed > downloadProgress) {
                 downloadProgress = completed;
-                console.log(`Download progress: ${completed}/${total}`);
               }
             },
             120000, // 2 minutes max wait time
@@ -194,16 +190,12 @@ export const useTranslateBatch = () => {
 
             // Double-check file exists even after download attempts
             if (!(await FileManager.exists(filePath))) {
-              console.warn(
-                `Chapter ${chapter.id} not available for translation, skipping`,
-              );
               continue;
             }
 
             // Read content and translate
             const chapterContent = await FileManager.readFile(filePath);
             if (!chapterContent || chapterContent.trim() === '') {
-              console.warn(`Chapter ${chapter.id} content is empty, skipping`);
               continue;
             }
 
@@ -228,7 +220,7 @@ export const useTranslateBatch = () => {
 
             totalTranslated++;
           } catch (error) {
-            console.error('Error translating chapter:', error);
+            // console.error('Error translating chapter:', error);
           }
         }
       }

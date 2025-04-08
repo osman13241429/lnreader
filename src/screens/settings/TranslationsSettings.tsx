@@ -9,7 +9,7 @@ const TranslationsSettings = () => {
 
   const handleDeleteAll = () => {
     // Implement the logic to delete all translations
-    console.log('Deleting all translations');
+    // console.log('Deleting all translations'); // Remove console log
   };
 
   return (

@@ -14,6 +14,7 @@ import {
 } from './backup/selfhost';
 import { migrateNovel, MigrateNovelData } from './migrate/migrateNovel';
 import { downloadChapter } from './download/downloadChapter';
+import { translateChapterTask } from './translation/TranslationService';
 
 export type BackgroundTask =
   | {
@@ -35,10 +36,31 @@ export type BackgroundTask =
   | { name: 'SELF_HOST_BACKUP'; data: SelfHostData }
   | { name: 'SELF_HOST_RESTORE'; data: SelfHostData }
   | { name: 'MIGRATE_NOVEL'; data: MigrateNovelData }
-  | DownloadChapterTask;
+  | DownloadChapterTask
+  | TranslateChapterTask;
 export type DownloadChapterTask = {
   name: 'DOWNLOAD_CHAPTER';
-  data: { chapterId: number; novelName: string; chapterName: string };
+  data: {
+    chapterId: number;
+    novelId: number;
+    novelName: string;
+    chapterName: string;
+    pluginId: string;
+  };
+};
+
+export type TranslateChapterTask = {
+  name: 'TRANSLATE_CHAPTER';
+  data: {
+    chapterId: number;
+    novelId: number;
+    pluginId: string;
+    novelName: string;
+    chapterName: string;
+    apiKey: string;
+    model: string;
+    instruction: string;
+  };
 };
 
 export type BackgroundTaskMetadata = {
@@ -68,9 +90,12 @@ export default class ServiceManager {
   }
   isMultiplicableTask(task: BackgroundTask) {
     return (
-      ['DOWNLOAD_CHAPTER', 'IMPORT_EPUB', 'MIGRATE_NOVEL'] as Array<
-        BackgroundTask['name']
-      >
+      [
+        'DOWNLOAD_CHAPTER',
+        'IMPORT_EPUB',
+        'MIGRATE_NOVEL',
+        'TRANSLATE_CHAPTER',
+      ] as Array<BackgroundTask['name']>
     ).includes(task.name);
   }
   start() {
@@ -145,6 +170,8 @@ export default class ServiceManager {
         return migrateNovel(task.task.data, this.setMeta.bind(this));
       case 'DOWNLOAD_CHAPTER':
         return downloadChapter(task.task.data, this.setMeta.bind(this));
+      case 'TRANSLATE_CHAPTER':
+        return translateChapterTask(task.task.data, this.setMeta.bind(this));
       default:
         return;
     }
@@ -153,16 +180,8 @@ export default class ServiceManager {
   static async lauch() {
     // retrieve class instance because this is running in different context
     const manager = ServiceManager.manager;
-    const doneTasks: Record<BackgroundTask['name'], number> = {
-      'IMPORT_EPUB': 0,
-      'UPDATE_LIBRARY': 0,
-      'DRIVE_BACKUP': 0,
-      'DRIVE_RESTORE': 0,
-      'SELF_HOST_BACKUP': 0,
-      'SELF_HOST_RESTORE': 0,
-      'MIGRATE_NOVEL': 0,
-      'DOWNLOAD_CHAPTER': 0,
-    };
+    const doneTasks: Record<string, number> = {};
+
     while (BackgroundService.isRunning()) {
       const currentTask = manager.getTaskList()[0];
       if (!currentTask) {
@@ -170,7 +189,8 @@ export default class ServiceManager {
       }
       try {
         await manager.executeTask(currentTask);
-        doneTasks[currentTask.task.name] += 1;
+        doneTasks[currentTask.task.name] =
+          (doneTasks[currentTask.task.name] || 0) + 1;
       } catch (error: any) {
         await Notifications.scheduleNotificationAsync({
           content: {
@@ -185,16 +205,20 @@ export default class ServiceManager {
     }
 
     if (manager.getTaskList().length === 0) {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Background tasks done',
-          body: Object.keys(doneTasks)
-            .filter(key => doneTasks[key as BackgroundTask['name']] > 0)
-            .map(key => `${key}: ${doneTasks[key as BackgroundTask['name']]}`)
-            .join('\n'),
-        },
-        trigger: null,
-      });
+      const summary = Object.keys(doneTasks)
+        .filter(key => doneTasks[key] > 0)
+        .map(key => `${key}: ${doneTasks[key]}`)
+        .join('\n');
+
+      if (summary) {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: 'Background tasks done',
+            body: summary,
+          },
+          trigger: null,
+        });
+      }
     }
   }
   getTaskName(task: BackgroundTask) {
@@ -202,6 +226,10 @@ export default class ServiceManager {
       case 'DOWNLOAD_CHAPTER':
         return (
           'Download ' + task.data.novelName + ' - ' + task.data.chapterName
+        );
+      case 'TRANSLATE_CHAPTER':
+        return (
+          'Translate ' + task.data.novelName + ' - ' + task.data.chapterName
         );
       case 'IMPORT_EPUB':
         return 'Import Epub ' + task.data.filename;
@@ -245,8 +273,58 @@ export default class ServiceManager {
         },
       }));
 
-      setMMKVObject(this.STORE_KEY, currentTasks.concat(newTasks));
+      const updatedTaskList = currentTasks.concat(newTasks);
+      setMMKVObject(this.STORE_KEY, updatedTaskList);
       this.start();
+    }
+  }
+  removeTaskAtIndex(index: number) {
+    const taskList = this.getTaskList();
+    if (index < 0 || index >= taskList.length) {
+      return;
+    }
+
+    if (index === 0 && this.isRunning) {
+      this.pause();
+      const newList = [...taskList];
+      newList.splice(index, 1);
+      setMMKVObject(this.STORE_KEY, newList);
+      if (newList.length > 0) {
+        this.resume();
+      }
+    } else {
+      const newList = [...taskList];
+      newList.splice(index, 1);
+      setMMKVObject(this.STORE_KEY, newList);
+    }
+  }
+  removeTasksAtIndexes(indices: number[]) {
+    if (!indices || indices.length === 0) {
+      return;
+    }
+
+    const taskList = this.getTaskList();
+    const sortedIndices = indices.sort((a, b) => b - a);
+
+    let needsPauseResume = false;
+    if (sortedIndices.includes(0) && this.isRunning) {
+      needsPauseResume = true;
+      this.pause();
+    }
+
+    const newList = [...taskList];
+    for (const index of sortedIndices) {
+      if (index >= 0 && index < newList.length) {
+        newList.splice(index, 1);
+      }
+    }
+
+    setMMKVObject(this.STORE_KEY, newList);
+
+    if (needsPauseResume && newList.length > 0) {
+      this.resume();
+    } else if (needsPauseResume && newList.length === 0) {
+      this.stop();
     }
   }
   removeTasksByName(name: BackgroundTask['name']) {
@@ -257,7 +335,11 @@ export default class ServiceManager {
         this.STORE_KEY,
         taskList.filter(t => t.task.name !== name),
       );
-      this.resume();
+      if (taskList.length > 0) {
+        this.resume();
+      } else {
+        this.stop();
+      }
     } else {
       setMMKVObject(
         this.STORE_KEY,

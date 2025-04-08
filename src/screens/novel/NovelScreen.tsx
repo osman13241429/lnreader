@@ -52,7 +52,9 @@ import NovelAppbar from './components/NovelAppbar';
 import { resolveUrl } from '@services/plugin/fetch';
 import { updateChapterProgressByIds } from '@database/queries/ChapterQueries';
 import { useTranslationSettings } from '@hooks/persisted/useSettings';
-import { batchTranslateChapters } from '@services/translation/BatchTranslationService';
+import ServiceManager, { BackgroundTask } from '@services/ServiceManager';
+import FileManager from '@native/FileManager';
+import { NOVEL_STORAGE } from '@utils/Storages';
 
 // Define the type here since the import is missing
 type RootStackParamList = {
@@ -294,18 +296,56 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         icon: 'translate',
         onPress: async () => {
           const chaptersToTranslate = selected;
-          if (chaptersToTranslate.length > 0 && novel) {
-            setUpdating(true);
-            await batchTranslateChapters(
-              chaptersToTranslate,
-              novel,
-              apiKey,
-              model,
-              defaultInstruction,
+          if (chaptersToTranslate.length > 0 && novel && apiKey) {
+            showToast(
+              `Adding ${chaptersToTranslate.length} translation tasks to queue...`,
             );
 
-            setUpdating(false);
-            refreshChapters();
+            const tasksToAdd: BackgroundTask[] = [];
+
+            for (const chapter of chaptersToTranslate) {
+              const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+              const fileExists = await FileManager.exists(filePath);
+
+              const translationTaskData = {
+                chapterId: chapter.id,
+                novelId: novel.id,
+                pluginId: novel.pluginId,
+                novelName: novel.name || 'Unknown Novel',
+                chapterName: chapter.name || `Chapter ${chapter.id}`,
+                apiKey: apiKey,
+                model: model,
+                instruction: defaultInstruction,
+              };
+
+              if (!fileExists) {
+                tasksToAdd.push({
+                  name: 'DOWNLOAD_CHAPTER',
+                  data: {
+                    chapterId: chapter.id,
+                    novelId: novel.id,
+                    pluginId: novel.pluginId,
+                    novelName: novel.name || 'Unknown Novel',
+                    chapterName: chapter.name || `Chapter ${chapter.id}`,
+                  },
+                });
+                tasksToAdd.push({
+                  name: 'TRANSLATE_CHAPTER',
+                  data: translationTaskData,
+                });
+              } else {
+                tasksToAdd.push({
+                  name: 'TRANSLATE_CHAPTER',
+                  data: translationTaskData,
+                });
+              }
+            }
+
+            if (tasksToAdd.length > 0) {
+              ServiceManager.manager.addTask(tasksToAdd);
+            }
+          } else if (!apiKey) {
+            showToast(safeGetString('translation.noApiKey'));
           }
           setSelected([]);
         },
@@ -389,6 +429,14 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         ...novel,
         cover: newCover,
       });
+    }
+  };
+
+  const safeGetString = (key: any, options?: any) => {
+    try {
+      return getString(key as any, options);
+    } catch (error) {
+      return key.split('.').pop() || 'ERROR';
     }
   };
 

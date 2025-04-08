@@ -92,6 +92,28 @@ const ChaptersSettingsSheet = ({
             : filterChapters(filter + ' AND bookmark=1');
         }}
       />
+      <Checkbox
+        theme={theme}
+        label={getString('novelScreen.bottomSheet.filters.translated')}
+        status={
+          filter.match('AND hasTranslation=1')
+            ? true
+            : filter.match('AND hasTranslation=0')
+            ? 'indeterminate'
+            : false
+        }
+        onPress={() => {
+          if (filter.match('AND hasTranslation=1')) {
+            filterChapters(
+              filter.replace(' AND hasTranslation=1', ' AND hasTranslation=0'),
+            );
+          } else if (filter.match('AND hasTranslation=0')) {
+            filterChapters(filter.replace(' AND hasTranslation=0', ''));
+          } else {
+            filterChapters(filter + ' AND hasTranslation=1');
+          }
+        }}
+      />
     </View>
   );
 
@@ -184,7 +206,7 @@ const ChaptersSettingsSheet = ({
   );
 
   return (
-    <BottomSheet snapPoints={[240]} bottomSheetRef={bottomSheetRef}>
+    <BottomSheet snapPoints={[280]} bottomSheetRef={bottomSheetRef}>
       <BottomSheetView
         style={[
           styles.contentContainer,

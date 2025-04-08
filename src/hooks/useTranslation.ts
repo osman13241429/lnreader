@@ -1,22 +1,18 @@
 import { useCallback, useState, useEffect } from 'react';
 import { useTranslationSettings } from '@hooks/persisted/useSettings';
-import { translateText } from '@services/translation/TranslationService';
 import {
-  saveTranslation,
   getTranslation,
   deleteTranslation,
 } from '@database/queries/TranslationQueries';
-import { ChapterInfo } from '@database/types';
+import { ChapterInfo, NovelInfo } from '@database/types';
 import FileManager from '@native/FileManager';
 import { NOVEL_STORAGE } from '@utils/Storages';
 import { showToast } from '@utils/showToast';
 import { getString } from '@strings/translations';
 import ServiceManager from '@services/ServiceManager';
-import { db } from '@database/db';
 
 export const useTranslation = (chapterId: number) => {
   const { apiKey, defaultInstruction, model } = useTranslationSettings();
-  const [isTranslating, setIsTranslating] = useState(false);
   const [translationContent, setTranslationContent] = useState<string | null>(
     null,
   );
@@ -65,10 +61,7 @@ export const useTranslation = (chapterId: number) => {
   }, [chapterId, checkTranslation]);
 
   const translateChapter = useCallback(
-    async (
-      chapter: ChapterInfo,
-      novel: { pluginId: string; id: number; name?: string },
-    ) => {
+    async (chapter: ChapterInfo, novel: NovelInfo) => {
       if (!apiKey) {
         showToast(safeGetString('translation.noApiKey'));
         return;
@@ -82,103 +75,46 @@ export const useTranslation = (chapterId: number) => {
         return;
       }
 
-      setIsTranslating(true);
+      // Check if chapter is downloaded *before* queueing
+      const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+      const fileExists = await FileManager.exists(filePath);
 
-      try {
-        // Check if chapter is downloaded
-        const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+      const translationTaskData = {
+        chapterId: chapter.id,
+        novelId: novel.id,
+        pluginId: novel.pluginId,
+        novelName: novel.name || 'Unknown Novel',
+        chapterName: chapter.name || `Chapter ${chapter.id}`,
+        apiKey: apiKey,
+        model: model,
+        instruction: defaultInstruction,
+      };
 
-        const fileExists = await FileManager.exists(filePath);
-        if (!fileExists) {
-          // If the file doesn't exist, we need to download it first
-          showToast('Downloading chapter first...');
-
-          try {
-            // Add to ServiceManager
-            ServiceManager.manager.addTask({
-              name: 'DOWNLOAD_CHAPTER',
-              data: {
-                chapterId: chapter.id,
-                novelName: novel.name || 'Unknown Novel',
-                chapterName: chapter.name || `Chapter ${chapter.id}`,
-              },
-            });
-
-            // Wait for file to exist with periodic checks
-            let downloadSuccessful = false;
-            let attempts = 0;
-            const maxAttempts = 30; // 30 attempts * 2 seconds = up to 1 minute wait
-
-            while (!downloadSuccessful && attempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-              downloadSuccessful = await FileManager.exists(filePath);
-              attempts++;
-            }
-
-            if (!downloadSuccessful) {
-              throw new Error('Download timeout');
-            }
-
-            showToast('Download complete, starting translation...');
-          } catch (downloadError) {
-            console.error('Error downloading chapter:', downloadError);
-            showToast('Error downloading chapter');
-            setIsTranslating(false);
-            return;
-          }
-        }
-
-        // Read the chapter content
-        const chapterContent = await FileManager.readFile(filePath);
-
-        if (!chapterContent || chapterContent.trim() === '') {
-          throw new Error('Chapter content is empty');
-        }
-
-        // Translate the content
-        const translationResult = await translateText(
-          apiKey,
-          chapterContent,
-          model,
-          defaultInstruction,
+      if (!fileExists) {
+        const downloadTaskData = {
+          chapterId: chapter.id,
+          novelId: novel.id,
+          pluginId: novel.pluginId,
+          novelName: novel.name || 'Unknown Novel',
+          chapterName: chapter.name || `Chapter ${chapter.id}`,
+        };
+        showToast(
+          'Chapter not downloaded. Adding download and translation to queue.',
         );
-
-        // Process the translated content to preserve line breaks
-        const processedContent = translationResult.content
-          .replace(/\n/g, '<br/>') // Replace newlines with <br/> tags
-          .replace(/ {2}/g, '&nbsp;&nbsp;'); // Replace double spaces with non-breaking spaces
-
-        // Save the processed translation to the database
-        await saveTranslation(
-          chapter.id,
-          processedContent,
-          translationResult.model,
-          translationResult.instruction,
-        );
-
-        // Also update the hasTranslation flag in the Chapter table
-        db.transaction(tx => {
-          tx.executeSql(
-            'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
-            [chapter.id],
-            () => {},
-            (_, _error) => {
-              return false;
-            },
-          );
+        ServiceManager.manager.addTask([
+          { name: 'DOWNLOAD_CHAPTER', data: downloadTaskData },
+          { name: 'TRANSLATE_CHAPTER', data: translationTaskData },
+        ]);
+      } else {
+        showToast('Adding translation task to queue.');
+        ServiceManager.manager.addTask({
+          name: 'TRANSLATE_CHAPTER',
+          data: translationTaskData,
         });
-
-        // Update the state with the translation
-        setTranslationContent(processedContent);
-        setShowTranslation(true);
-        showToast(safeGetString('translation.success'));
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error';
-        showToast(safeGetString('translation.error', { error: errorMessage }));
-      } finally {
-        setIsTranslating(false);
       }
+
+      // setIsTranslating(true) might be removed or changed to reflect queue status
+      // No need for try/catch/finally here as the task runs in the background
     },
     [apiKey, defaultInstruction, model, safeGetString],
   );
@@ -254,7 +190,6 @@ export const useTranslation = (chapterId: number) => {
   }, [chapterId, translationContent, safeGetString]);
 
   return {
-    isTranslating,
     translationContent,
     showTranslation,
     translateChapter,

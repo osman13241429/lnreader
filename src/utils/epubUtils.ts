@@ -2,9 +2,11 @@ import FileManager from '@native/FileManager';
 import { ChapterInfo, NovelInfo, TranslationInfo } from '@database/types';
 import { getPlugin } from '@plugins/pluginManager';
 import { resolveUrl } from '@services/plugin/fetch';
-import { showToast } from './showToast';
+import { showToast } from '@utils/showToast';
 import { v4 as uuidv4 } from 'uuid';
 import { zip } from 'react-native-zip-archive';
+import { NOVEL_STORAGE } from '@utils/Storages';
+import { getTranslation } from '@database/queries/TranslationQueries';
 
 // Types for EPUB specific data
 type ImageResource = {
@@ -35,6 +37,8 @@ type EpubOptions = {
   stylesheet?: string;
   embedImages?: boolean;
   pluginId?: string;
+  useTranslatedContent?: boolean;
+  useChapterNumberOnlyTitle?: boolean;
 };
 
 // Helper to escape XML special characters
@@ -79,7 +83,7 @@ const getMimeType = (filename: string): string => {
  */
 export class EpubPackage {
   private workDir: string;
-  private contentDir: string;
+  private contentDir: string = ''; // Initialize with empty string
   private metaInfDir: string;
   private oebpsDir: string;
   private imagesDir: string;
@@ -231,6 +235,12 @@ img {
         processedHtml = await this.extractAndProcessImages(html, position);
       }
 
+      // Ensure BR tags are self-closing
+      processedHtml = processedHtml.replace(
+        /<br\s*(?!\/)>|<br>(?!\s*\/?)/gi,
+        '<br/>',
+      );
+
       // Create valid XHTML document
       const chapterContent = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -243,7 +253,9 @@ img {
   <body>
     <div class="chapter">
       <h1>${escapeXml(title)}</h1>
-      ${processedHtml}
+      <div>
+        ${processedHtml}
+      </div>
     </div>
   </body>
 </html>`;
@@ -431,7 +443,7 @@ img {
           // Try with app's document directory if path is relative
           coverPath.startsWith('/')
             ? null
-            : `${FileManager.DocumentDirectoryPath}/${coverPath}`,
+            : `${FileManager.ExternalCachesDirectoryPath}/${coverPath}`,
         ].filter(Boolean);
 
         let foundAlternativePath = false;
@@ -439,7 +451,6 @@ img {
           if (altPath && (await FileManager.exists(altPath))) {
             localCoverPath = altPath;
             foundAlternativePath = true;
-            console.log('Found cover at alternative path:', localCoverPath);
             break;
           }
         }
@@ -505,8 +516,6 @@ img {
         position: -1,
         properties: ['cover-image'],
       });
-
-      console.log('Successfully added cover image to EPUB');
     } catch (error) {
       console.error('Failed to add cover image:', error);
     }
@@ -690,11 +699,8 @@ img {
       );
       await FileManager.mkdir(outputDir);
 
-      // Since FileManager.zipDirectory is not available, use alternative approach
-      // First, create a list of all files to include in the EPUB
+      // Create the EPUB ZIP
       const files = await this.getAllEpubFiles();
-
-      // Then create the EPUB ZIP manually
       await this.createEpubZip(files);
 
       // Remove temp files
@@ -830,12 +836,8 @@ img {
         }
       }
 
-      // Then delete the empty directory - rmdir may not exist, use unlink as fallback
-      if (typeof FileManager.rmdir === 'function') {
-        await FileManager.rmdir(dirPath);
-      } else {
-        await FileManager.unlink(dirPath);
-      }
+      // Then delete the empty directory
+      await FileManager.unlink(dirPath);
     } catch (error) {
       console.error(`Error deleting directory ${dirPath}:`, error);
       throw error;
@@ -860,6 +862,8 @@ export const createNovelEpub = async (
   options?: {
     embedImages?: boolean;
     stylesheet?: string;
+    useTranslatedContent?: boolean;
+    useChapterNumberOnlyTitle?: boolean;
   },
 ): Promise<string> => {
   const epub = new EpubPackage(
@@ -871,6 +875,8 @@ export const createNovelEpub = async (
       pluginId: novel.pluginId,
       embedImages: options?.embedImages || false,
       stylesheet: options?.stylesheet,
+      useTranslatedContent: options?.useTranslatedContent || false,
+      useChapterNumberOnlyTitle: options?.useChapterNumberOnlyTitle || false,
     },
     outputPath,
   );
@@ -947,14 +953,57 @@ export const createNovelEpub = async (
     // Add each chapter
     for (let i = 0; i < sortedChapters.length; i++) {
       const chapter = sortedChapters[i];
-      const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+      const chapterTitle =
+        chapter.name?.trim() || `Chapter ${chapter.chapterNumber || i + 1}`;
+      let finalChapterTitle = chapterTitle;
 
-      if (await FileManager.exists(filePath)) {
-        const chapterContent = await FileManager.readFile(filePath);
-        const chapterTitle =
-          chapter.name?.trim() || `Chapter ${chapter.chapterNumber || i + 1}`;
+      // Optionally use only chapter number
+      if (options?.useChapterNumberOnlyTitle) {
+        const numberMatch = chapterTitle.match(/\d+(\.\d+)?/);
+        if (numberMatch) {
+          finalChapterTitle = `Chapter ${numberMatch[0]}`;
+        } else if (chapter.chapterNumber !== undefined) {
+          finalChapterTitle = `Chapter ${chapter.chapterNumber}`;
+        } else {
+          // Fallback if no number found
+          finalChapterTitle = `Chapter ${i + 1}`;
+        }
+      }
 
-        await epub.addChapter(chapterTitle, chapterContent, i);
+      let chapterContentToUse: string | null = null;
+      let usedTranslation = false;
+
+      // Try using translation if requested and available
+      if (options?.useTranslatedContent) {
+        try {
+          const translation = await getTranslation(chapter.id);
+          if (translation?.content) {
+            chapterContentToUse = translation.content;
+            usedTranslation = true;
+          }
+        } catch (translationError) {
+          console.warn(
+            `Error fetching translation for chapter ${chapter.id}:`,
+            translationError,
+          );
+        }
+      }
+
+      // If translation wasn't used or found, use original content
+      if (!usedTranslation) {
+        const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+        const fileExists = await FileManager.exists(filePath);
+
+        if (fileExists) {
+          chapterContentToUse = await FileManager.readFile(filePath);
+        } else {
+          // File not found, chapterContentToUse remains null
+        }
+      }
+
+      // Add chapter to EPUB only if we have content
+      if (chapterContentToUse !== null) {
+        await epub.addChapter(finalChapterTitle, chapterContentToUse, i);
       }
     }
 
@@ -1072,6 +1121,3 @@ export const createTranslationEpub = async (
     throw error;
   }
 };
-
-// Export necessary constants for importing
-export const NOVEL_STORAGE = '@utils/Storages';

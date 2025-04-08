@@ -3,6 +3,7 @@ import { IconButton, Portal } from 'react-native-paper';
 import ChooseEpubLocationModal from './ChooseEpubLocationModal';
 import { StatusBar } from 'react-native';
 import { ThemeColors } from '@theme/types';
+import FileManager from '@native/FileManager';
 
 import { ChapterInfo, NovelInfo } from '@database/types';
 import { useChapterReaderSettings } from '@hooks/persisted';
@@ -14,6 +15,13 @@ interface EpubIconButtonProps {
   theme: ThemeColors;
   novel: NovelInfo;
   chapters: ChapterInfo[];
+}
+
+// Define type for settings received from modal
+interface EpubExportSettings {
+  uri: string;
+  useTranslatedContent: boolean;
+  useChapterNumberOnlyTitle: boolean;
 }
 
 const EpubIconButton: React.FC<EpubIconButtonProps> = ({
@@ -83,14 +91,32 @@ const EpubIconButton: React.FC<EpubIconButtonProps> = ({
     [novel, epubUseAppTheme, readerSettings, epubUseCustomCSS, theme.primary],
   );
 
-  const createEpub = async (outputPath: string) => {
+  const createEpub = async (settings: EpubExportSettings) => {
     try {
       showToast('Creating EPUB... This may take a while.');
 
-      // Use the new standardized EPUB creation function
-      await createNovelEpub(novel, chapters, outputPath, {
+      // Sanitize novel name for filename
+      const sanitizedNovelName = novel.name.replace(/[/\\?%*:|"<>]/g, '-');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `${sanitizedNovelName}-${timestamp}.epub`;
+
+      // Define the standard output directory
+      const baseDir = '/storage/emulated/0/Download/LNReader';
+      const novelDir = `${baseDir}/${sanitizedNovelName}`;
+
+      // Create directories
+      await FileManager.mkdir(baseDir);
+      await FileManager.mkdir(novelDir);
+
+      // Construct the final output path
+      const finalOutputPath = `${novelDir}/${filename}`;
+
+      // Use the new standardized EPUB creation function with the correct path and translation setting
+      await createNovelEpub(novel, chapters, finalOutputPath, {
         embedImages: true,
         stylesheet: epubStyle || undefined,
+        useTranslatedContent: settings.useTranslatedContent,
+        useChapterNumberOnlyTitle: settings.useChapterNumberOnlyTitle,
       });
     } catch (error) {
       showToast(

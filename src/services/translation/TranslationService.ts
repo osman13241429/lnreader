@@ -1,4 +1,13 @@
 import { showToast } from '@utils/showToast';
+import {
+  TranslateChapterTask,
+  BackgroundTaskMetadata,
+} from '@services/ServiceManager';
+import FileManager from '@native/FileManager';
+import { NOVEL_STORAGE } from '@utils/Storages';
+import { saveTranslation } from '@database/queries/TranslationQueries';
+import { db } from '@database/db';
+import { checkIfChapterHasTranslation } from '@database/queries/TranslationQueries';
 
 export interface TranslationResponse {
   content: string;
@@ -55,7 +64,6 @@ export const fetchAvailableModels = async (): Promise<OpenRouterModel[]> => {
           : undefined,
       }));
   } catch (error) {
-    console.error('Error fetching models:', error);
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
     showToast(`Error: ${errorMessage}`);
@@ -168,7 +176,6 @@ export const testConnection = async (
         'Connection successful! Your API key and model are working correctly.',
     };
   } catch (error) {
-    console.error('Test connection error:', error);
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error';
     return { success: false, message: errorMessage };
@@ -274,7 +281,6 @@ export const translateText = async (
       !data.choices[0].message ||
       !data.choices[0].message.content
     ) {
-      console.error('Unexpected response format:', JSON.stringify(data));
       throw new Error('Unexpected response format from translation service');
     }
 
@@ -284,10 +290,130 @@ export const translateText = async (
       instruction: enhancedInstruction,
     };
   } catch (error) {
-    // Log the error for debugging
-    console.error('Translation error:', error);
-
     // Re-throw the error to be handled by the caller
+    throw error;
+  }
+};
+
+/**
+ * Executes the translation task for a single chapter in the background.
+ */
+export const translateChapterTask = async (
+  data: TranslateChapterTask['data'],
+  setMeta: (
+    transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+  ) => void,
+): Promise<void> => {
+  const {
+    chapterId,
+    novelId,
+    pluginId,
+    apiKey,
+    model,
+    instruction,
+    chapterName,
+  } = data;
+
+  setMeta(meta => ({
+    ...meta,
+    isRunning: true,
+    progress: 0,
+    progressText: 'Starting translation...',
+  }));
+
+  try {
+    // 1. Check if already translated
+    setMeta(meta => ({ ...meta, progressText: 'Checking existing...' }));
+    const alreadyTranslated = await checkIfChapterHasTranslation(chapterId);
+    if (alreadyTranslated) {
+      setMeta(meta => ({
+        ...meta,
+        progress: 1,
+        isRunning: false,
+        progressText: 'Already translated',
+      }));
+      return;
+    }
+
+    // 2. Check if chapter content exists locally
+    setMeta(meta => ({
+      ...meta,
+      progress: 0.2,
+      progressText: 'Locating content...',
+    }));
+    const filePath = `${NOVEL_STORAGE}/${pluginId}/${novelId}/${chapterId}/index.html`;
+    const fileExists = await FileManager.exists(filePath);
+
+    if (!fileExists) {
+      throw new Error(
+        `Chapter content not found. Download chapter '${chapterName}' first.`,
+      );
+    }
+
+    // 3. Read content
+    setMeta(meta => ({
+      ...meta,
+      progress: 0.4,
+      progressText: 'Reading content...',
+    }));
+    const chapterContent = await FileManager.readFile(filePath);
+    if (!chapterContent || chapterContent.trim() === '') {
+      throw new Error('Chapter content is empty.');
+    }
+
+    // 4. Translate using the core translateText function
+    setMeta(meta => ({
+      ...meta,
+      progress: 0.6,
+      progressText: 'Translating...',
+    }));
+    const translationResult = await translateText(
+      apiKey,
+      chapterContent,
+      model,
+      instruction,
+    );
+
+    // 5. Process and save
+    setMeta(meta => ({ ...meta, progress: 0.8, progressText: 'Saving...' }));
+    const processedContent = translationResult.content
+      .replace(/\n/g, '<br/>')
+      .replace(/ {2}/g, '&nbsp;&nbsp;');
+
+    await saveTranslation(
+      chapterId,
+      processedContent,
+      translationResult.model,
+      translationResult.instruction,
+    );
+
+    // Update hasTranslation flag (redundant with saveTranslation but safe to keep)
+    db.transaction(tx => {
+      tx.executeSql(
+        'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
+        [chapterId],
+        () => {},
+        (_, _error) => {
+          return false;
+        },
+      );
+    });
+
+    // 6. Mark as complete
+    setMeta(meta => ({
+      ...meta,
+      progress: 1,
+      isRunning: false,
+      progressText: 'Translation complete',
+    }));
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown translation error';
+    setMeta(meta => ({
+      ...meta,
+      isRunning: false,
+      progressText: `Error: ${errorMessage}`,
+    }));
     throw error;
   }
 };

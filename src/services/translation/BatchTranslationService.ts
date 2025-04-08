@@ -261,6 +261,8 @@ const attemptDownloadChapters = async (
         name: 'DOWNLOAD_CHAPTER',
         data: {
           chapterId: chapterId,
+          novelId: novel.id,
+          pluginId: novel.pluginId,
           novelName: novel.name || 'Unknown Novel',
           chapterName:
             chapter.name || chapter.chapterName || `Chapter ${chapterId}`,
@@ -319,7 +321,7 @@ const attemptDownloadChapters = async (
       showToast(`${failedDownloads.length} chapters failed to download`);
     }
   } catch (error) {
-    // Handle error silently
+    // console.error('Error during download attempt:', error); // Remove console log
   }
 };
 

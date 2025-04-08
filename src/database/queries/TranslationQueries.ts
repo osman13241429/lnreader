@@ -19,7 +19,6 @@ export const saveTranslation = async (
          content = ?, model = ?, instruction = ?, createdAt = CURRENT_TIMESTAMP`,
         [chapterId, content, model, instruction, content, model, instruction],
         (_, { insertId, rowsAffected }) => {
-          // Update the Chapter table to mark that this chapter has a translation
           tx.executeSql(
             'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
             [chapterId],
@@ -66,7 +65,6 @@ export const deleteTranslation = async (chapterId: number): Promise<void> => {
         [chapterId],
         (_, { rowsAffected }) => {
           if (rowsAffected > 0) {
-            // Update the Chapter table to mark that this chapter no longer has a translation
             tx.executeSql(
               'UPDATE Chapter SET hasTranslation = 0 WHERE id = ?',
               [chapterId],
@@ -95,7 +93,6 @@ export const deleteAllTranslations = async (): Promise<number> => {
         'DELETE FROM Translation',
         [],
         (_, { rowsAffected }) => {
-          // Update all chapters to mark that they no longer have a translation
           tx.executeSql(
             'UPDATE Chapter SET hasTranslation = 0',
             [],
@@ -173,19 +170,14 @@ export const getAllTranslationsByNovel = async (): Promise<
   NovelGroupedTranslations[]
 > => {
   try {
-    // Get all translations
     const translations = await getAllTranslations();
 
-    // Bail early if no translations
     if (!translations || translations.length === 0) {
-      console.log('No translations found to group by novel');
       return [];
     }
 
-    // Group by novel name first, then by novelId as fallback
     const novelGroups = new Map<string, any[]>();
 
-    // First pass - group translations by novel name
     translations.forEach(translation => {
       const novelName = translation.novelName || 'Unknown Novel';
 
@@ -196,16 +188,11 @@ export const getAllTranslationsByNovel = async (): Promise<
       novelGroups.get(novelName)?.push(translation);
     });
 
-    // Convert to our result format
     const result: NovelGroupedTranslations[] = [];
 
-    // Counter for generated novel IDs (for novels without an ID)
     let nextNovelId = -1;
 
-    // Second pass - create novel groups with chapters
     for (const [novelName, novelTranslations] of novelGroups.entries()) {
-      // Find a consistent novelId for this group if possible
-      // Use the first valid novelId found, or generate one if none exists
       const firstWithId = novelTranslations.find(t => t.novelId != null);
       const novelId = firstWithId?.novelId || nextNovelId--;
       const novelCover = firstWithId?.novelCover || null;
@@ -218,7 +205,7 @@ export const getAllTranslationsByNovel = async (): Promise<
         chapters: novelTranslations.map(t => ({
           id: t.id,
           chapterId: t.chapterId,
-          novelId: novelId, // Use the consistent novelId we found or generated
+          novelId: novelId,
           chapterTitle: t.chapterName || 'Unknown Chapter',
           novelTitle: t.novelName || 'Unknown Novel',
           novelCover: t.novelCover,
@@ -234,14 +221,33 @@ export const getAllTranslationsByNovel = async (): Promise<
       result.push(novelGroup);
     }
 
-    console.log(
-      `Grouped translations: ${result.length} novels with chapters:`,
-      result.map(n => `${n.novelTitle}: ${n.chapters?.length || 0}`).join(', '),
-    );
-
     return result;
   } catch (error) {
-    console.error('Error grouping translations by novel:', error);
     return [];
   }
+};
+
+export const checkIfChapterHasTranslation = async (
+  chapterId: number,
+): Promise<boolean> => {
+  return new Promise<boolean>(resolve => {
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT hasTranslation FROM Chapter WHERE id = ?',
+        [chapterId],
+        (_, result) => {
+          if (result.rows.length > 0) {
+            const hasTranslation = result.rows.item(0).hasTranslation === 1;
+            resolve(hasTranslation);
+          } else {
+            resolve(false);
+          }
+        },
+        (_, _error) => {
+          resolve(false);
+          return false;
+        },
+      );
+    });
+  });
 };

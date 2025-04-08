@@ -12,7 +12,11 @@ import { showToast } from '@utils/showToast';
 
 interface ChooseEpubLocationModalProps {
   isVisible: boolean;
-  onSubmit?: (uri: string) => void;
+  onSubmit?: (settings: {
+    uri: string;
+    useTranslatedContent: boolean;
+    useChapterNumberOnlyTitle: boolean;
+  }) => void;
   hideModal: () => void;
 }
 
@@ -34,10 +38,14 @@ const ChooseEpubLocationModal: React.FC<ChooseEpubLocationModalProps> = ({
   const useAppTheme = useBoolean(epubUseAppTheme);
   const useCustomCSS = useBoolean(epubUseCustomCSS);
   const useCustomJS = useBoolean(epubUseCustomJS);
+  const useTranslated = useBoolean(false);
+  const useChapterNumberOnly = useBoolean(false);
 
   const onDismiss = () => {
     hideModal();
     setUri(epubLocation);
+    useTranslated.setFalse();
+    useChapterNumberOnly.setFalse();
   };
 
   const onSubmit = () => {
@@ -48,8 +56,14 @@ const ChooseEpubLocationModal: React.FC<ChooseEpubLocationModalProps> = ({
       epubUseCustomJS: useCustomJS.value,
     });
 
-    onSubmitProp?.(uri);
+    onSubmitProp?.({
+      uri: uri,
+      useTranslatedContent: useTranslated.value,
+      useChapterNumberOnlyTitle: useChapterNumberOnly.value,
+    });
     hideModal();
+    useTranslated.setFalse();
+    useChapterNumberOnly.setFalse();
   };
 
   const openFolderPicker = async () => {
@@ -114,6 +128,20 @@ const ChooseEpubLocationModal: React.FC<ChooseEpubLocationModalProps> = ({
           value={useCustomJS.value}
           onPress={useCustomJS.toggle}
           theme={theme}
+        />
+        <SwitchItem
+          label="Use Translated Content"
+          description="If available, chapter translations will be used instead of original content."
+          value={useTranslated.value}
+          onPress={useTranslated.toggle}
+          theme={theme}
+        />
+        <SwitchItem
+          label={getString('novelScreen.epubChapterNumberOnly')}
+          value={useChapterNumberOnly.value}
+          onPress={useChapterNumberOnly.toggle}
+          theme={theme}
+          description="Use 'Chapter X' instead of full title"
         />
       </View>
       <List.InfoItem

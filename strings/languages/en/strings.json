@@ -334,9 +334,10 @@
         "sourceTitle": "Source title"
       },
       "filters": {
-        "bookmarked": "Bookmarked",
         "downloaded": "Downloaded",
-        "unread": "Unread"
+        "unread": "Unread",
+        "bookmarked": "Bookmarked",
+        "translated": "Translated"
       },
       "order": {
         "byChapterName": "By chapter name",
@@ -404,7 +405,11 @@
     "tracked": "Tracked",
     "tracking": "Tracking",
     "unknownStatus": "Unknown status",
-    "updatedToast": "Updated %{name}"
+    "updatedToast": "Updated %{name}",
+    "epubFilenameHint": "The EPUB file will be saved with this name. You can change it.",
+    "epubUseTranslation": "Use Translated Content",
+    "epubChapterNumberOnly": "Use Chapter Number Only",
+    "chooseEpubFilename": "EPUB Export Options"
   },
   "readerScreen": {
     "bottomSheet": {
