@@ -118,6 +118,8 @@ export interface ChapterReaderSettings {
     rate?: number;
     pitch?: number;
   };
+  ttsProvider?: 'System' | 'Edge';
+  edgeTTSLocale?: string;
   epubLocation: string;
   epubUseAppTheme: boolean;
   epubUseCustomCSS: boolean;
@@ -217,6 +219,8 @@ export const initialChapterReaderSettings: ChapterReaderSettings = {
     rate: 1,
     pitch: 1,
   },
+  ttsProvider: 'System',
+  edgeTTSLocale: '',
   epubLocation: '',
   epubUseAppTheme: false,
   epubUseCustomCSS: false,

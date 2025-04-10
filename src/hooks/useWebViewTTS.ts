@@ -11,6 +11,9 @@ import {
   initialChapterReaderSettings,
 } from '@hooks/persisted/useSettings';
 import { ChapterInfo } from '@database/types';
+import { EdgeTTSClient, OUTPUT_FORMAT } from '@services/tts/EdgeTTSProvider';
+import * as FileSystem from 'expo-file-system';
+import { Audio } from 'expo-av';
 
 // Type definitions (could be moved to a types file later)
 type WebViewPostEvent = {
@@ -21,7 +24,7 @@ type WebViewPostEvent = {
 // Define the return type for the hook
 interface UseWebViewTTSResult {
   injectTTSLogic: () => void;
-  processTTSMessage: (event: WebViewPostEvent) => boolean;
+  processTTSMessage: (event: WebViewPostEvent) => Promise<boolean>;
   stopTTSAndClearState: () => void;
 }
 
@@ -67,6 +70,18 @@ const setChaptersReadCount = (
   }
 };
 
+// Helper function to convert Uint8Array to Base64 string
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64');
+}
+
+// Helper to handle edge cases with special characters for Edge TTS
+function sanitizeTextForEdgeTTS(text: string): string {
+  return text
+    .replace(/<<|>>/g, '"') // Replace << and >> with quotes
+    .replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, ' '); // Remove non-alphanumeric, punctuation, or space chars
+}
+
 export const useWebViewTTS = (
   webViewRef: React.RefObject<WebView>,
   nextChapter: ChapterInfo | undefined,
@@ -77,6 +92,13 @@ export const useWebViewTTS = (
   const sleepTimerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const shouldAutoStartTTS = useRef(getShouldAutoStartTTS());
   const sleepTimerActive = useRef<boolean>(false);
+  const edgeTtsClientRef = useRef<EdgeTTSClient | null>(null);
+  const audioSoundRef = useRef<Audio.Sound | null>(null);
+  const preloadedSoundRef = useRef<{
+    text: string;
+    sound: Audio.Sound;
+    filePath: string;
+  } | null>(null);
 
   // Simplified timer cleanup
   const clearLocalTimers = useCallback(() => {
@@ -92,6 +114,9 @@ export const useWebViewTTS = (
 
     return () => {
       Speech.stop();
+      edgeTtsClientRef.current?.close();
+      unloadSound();
+      unloadPreloadedSound();
 
       if (!shouldAutoStartTTS.current) {
         clearLocalTimers();
@@ -106,6 +131,23 @@ export const useWebViewTTS = (
         clearLocalTimers();
       }
     };
+  }, [clearLocalTimers]);
+
+  // Define stopTTSAndClearState first as other callbacks depend on it
+  const stopTTSAndClearState = useCallback(async () => {
+    Speech.stop();
+    edgeTtsClientRef.current?.close();
+    await unloadSound();
+    await unloadPreloadedSound();
+    clearLocalTimers();
+    setSleepTimerExpiry(null);
+    sleepTimerActive.current = false;
+    shouldAutoStartTTS.current = false;
+    setShouldAutoStartTTS(false);
+    const currentGeneralSettings =
+      getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
+      initialChapterGeneralSettings;
+    setChaptersReadCount(0, currentGeneralSettings);
   }, [clearLocalTimers]);
 
   // Setup sleep timer logic
@@ -157,19 +199,13 @@ export const useWebViewTTS = (
         clearTimeout(sleepTimerTimeoutRef.current);
       }
       sleepTimerTimeoutRef.current = setTimeout(() => {
-        Speech.stop();
-        setSleepTimerExpiry(null);
-        sleepTimerActive.current = false;
-        shouldAutoStartTTS.current = false;
-        setShouldAutoStartTTS(false);
-        const latestGeneralSettings =
-          getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
-          initialChapterGeneralSettings;
-        setChaptersReadCount(0, latestGeneralSettings);
+        console.log('TTS Sleep Timer expired.');
+
+        // Call the unified stop function to handle state and cleanup
+        stopTTSAndClearState();
 
         webViewRef.current?.injectJavaScript(`
           tts.reading = false;
-          tts.stop('timer_expired');
           try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
         `);
       }, timeLeft);
@@ -179,7 +215,7 @@ export const useWebViewTTS = (
         setSleepTimerExpiry(null);
       }
     }
-  }, [webViewRef]);
+  }, [webViewRef, stopTTSAndClearState]);
 
   // Effect runs when chapter changes
   useEffect(() => {
@@ -194,8 +230,63 @@ export const useWebViewTTS = (
     }
   }, [chapterId]);
 
-  // Handle TTS completion
-  const handleTTSComplete = useCallback(() => {
+  // Helper to unload the preloaded sound and delete its file
+  const unloadPreloadedSound = async () => {
+    if (preloadedSoundRef.current) {
+      console.log(
+        'Unloading preloaded sound for:',
+        preloadedSoundRef.current.text,
+      );
+      const { sound, filePath } = preloadedSoundRef.current;
+      preloadedSoundRef.current = null; // Clear ref immediately
+      try {
+        await sound.unloadAsync();
+      } catch (e) {
+        console.error('Error unloading preloaded sound object:', e);
+      }
+      try {
+        await FileSystem.deleteAsync(filePath, { idempotent: true });
+        console.log('Deleted preloaded file:', filePath);
+      } catch (e) {
+        console.error('Error deleting preloaded file:', e);
+      }
+    }
+  };
+
+  // Modify unloadSound to also delete the file
+  const unloadSound = async () => {
+    if (audioSoundRef.current) {
+      console.log('Unloading current sound');
+      const soundToUnload = audioSoundRef.current;
+      audioSoundRef.current = null; // Clear ref immediately
+      let currentUri = null;
+      try {
+        const status = await soundToUnload.getStatusAsync();
+        if (status.isLoaded) {
+          currentUri = status.uri;
+          await soundToUnload.unloadAsync();
+        }
+      } catch (unloadError) {
+        console.error('Error unloading sound:', unloadError);
+      }
+      // Try deleting the associated file if it looks like one of ours
+      if (
+        currentUri &&
+        currentUri.startsWith(FileSystem.cacheDirectory + 'tts_')
+      ) {
+        try {
+          await FileSystem.deleteAsync(currentUri, { idempotent: true });
+          console.log('Deleted current sound file:', currentUri);
+        } catch (e) {
+          console.error('Error deleting current sound file:', e);
+        }
+      }
+    }
+  };
+
+  // Modified handleTTSComplete
+  const handleTTSComplete = useCallback(async () => {
+    await unloadSound();
     const currentGeneralSettings =
       getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
       initialChapterGeneralSettings;
@@ -208,18 +299,16 @@ export const useWebViewTTS = (
         const newCount = currentCount + 1;
 
         if (newCount >= currentGeneralSettings.TTSReadChaptersCount) {
-          Speech.stop();
-          clearLocalTimers();
-          setSleepTimerExpiry(null);
-          sleepTimerActive.current = false;
-          shouldAutoStartTTS.current = false;
-          setShouldAutoStartTTS(false);
-          setChaptersReadCount(0, currentGeneralSettings);
+          // Limit reached, stop everything using the unified function
+          stopTTSAndClearState();
           navigate = false;
 
           webViewRef.current?.injectJavaScript(`
             tts.reading = false;
-            try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
+            try {
+                const controller = document.getElementById('TTS-Controller');
+                if (controller) { controller.firstElementChild.innerHTML = volumnIcon; }
+            } catch(e){}
           `);
         } else {
           setChaptersReadCount(newCount, currentGeneralSettings);
@@ -234,28 +323,33 @@ export const useWebViewTTS = (
         setTimeout(() => navigateChapter('NEXT'), 150);
       }
     } else {
-      Speech.stop();
-      clearLocalTimers();
-      setSleepTimerExpiry(null);
-      sleepTimerActive.current = false;
-      shouldAutoStartTTS.current = false;
-      setShouldAutoStartTTS(false);
-      const latestGeneralSettings =
-        getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
-        initialChapterGeneralSettings;
-      setChaptersReadCount(0, latestGeneralSettings);
+      // Chapter finished, but not auto-navigating or auto-next is off.
+      // Stop and clear state.
+      stopTTSAndClearState();
 
       webViewRef.current?.injectJavaScript(`
           tts.reading = false;
-          try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
+          try {
+              const controller = document.getElementById('TTS-Controller');
+              if (controller) { controller.firstElementChild.innerHTML = volumnIcon; }
+          } catch(e){}
       `);
     }
-  }, [nextChapter, navigateChapter, clearLocalTimers, webViewRef]);
+  }, [
+    nextChapter,
+    navigateChapter,
+    clearLocalTimers,
+    webViewRef,
+    stopTTSAndClearState,
+  ]);
 
-  // Inject TTS patching logic
+  // Inject TTS patching logic - Simplified version
   const injectTTSLogic = useCallback(() => {
     webViewRef.current?.injectJavaScript(`
+      console.log("[TTS WebView] Initializing TTS functionality");
       if (typeof tts !== 'undefined' && !tts._patched) {
+        console.log("[TTS WebView] Found TTS object, patching methods");
+        
         tts._originalStop = tts.stop;
         tts.stop = function(reason) {
           reader.post({ type: 'stop-speak', data: reason || 'manual' });
@@ -268,40 +362,52 @@ export const useWebViewTTS = (
 
         tts._originalNext = tts.next;
         tts.next = function() {
-           try {
+          try {
+            console.log("[TTS] next called");
+            
+            // Clean up previous node
             this.currentElement?.classList?.remove('highlight');
+            
             if (this.findNextTextNode()) {
+              // Highlight current node
+              this.currentElement.classList.add('highlight');
+              
               this.reading = true;
+              console.log("[TTS] Speaking text:", this.currentElement.textContent?.trim().substring(0, 30));
               this.speak();
+              return true;
             } else {
+              console.log("[TTS] No more nodes found");
               this.reading = false;
               this.stop('chapter_end_auto_transition');
               try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
               reader.post({ type: 'tts-chapter-complete' });
+              return false;
             }
           } catch (e) {
             console.error('[TTS WV Error] next():', e);
             this.stop('error');
+            return false;
           }
         };
 
-         tts._originalPause = tts.pause;
-         tts.pause = function() {
-           this.reading = false;
-           reader.post({ type: 'stop-speak', data: 'pause' });
-         };
+        tts._originalPause = tts.pause;
+        tts.pause = function() {
+          this.reading = false;
+          reader.post({ type: 'stop-speak', data: 'pause' });
+        };
 
-         tts._originalResume = tts.resume;
-         tts.resume = function() {
-            if (!this.reading) {
-              if (this.currentElement && this.currentElement.id !== 'LNReader-chapter') {
-                 this.speak();
-                 this.reading = true;
-              } else {
-                 this.next();
-              }
+        tts._originalResume = tts.resume;
+        tts.resume = function() {
+          if (!this.reading) {
+            if (this.currentElement && this.currentElement.id !== 'LNReader-chapter') {
+              this.speak();
+              this.reading = true;
+            } else {
+              this.next();
             }
-          };
+          }
+        };
 
         tts._patched = true;
       }
@@ -317,19 +423,149 @@ export const useWebViewTTS = (
 
       true;
     `);
-  }, [webViewRef]);
+  }, [webViewRef, stopTTSAndClearState]);
 
-  // Process TTS-related messages
+  // Simplified processTTSMessage with cleaner Edge TTS handling
   const processTTSMessage = useCallback(
-    (event: WebViewPostEvent): boolean => {
+    async (event: WebViewPostEvent): Promise<boolean> => {
       const currentGeneralSettings =
         getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
         initialChapterGeneralSettings;
       const currentReaderSettings =
         getMMKVObject<ChapterReaderSettings>(CHAPTER_READER_SETTINGS) ||
         initialChapterReaderSettings;
+      const { ttsProvider = 'System', tts } = currentReaderSettings;
 
       switch (event.type) {
+        case 'preload-speak':
+          // We'll keep preloading for Edge TTS but simplify it
+          if (
+            typeof event.data === 'string' &&
+            event.data.trim() &&
+            ttsProvider === 'Edge' &&
+            tts?.voice?.identifier
+          ) {
+            await unloadPreloadedSound();
+            try {
+              if (!edgeTtsClientRef.current) {
+                edgeTtsClientRef.current = new EdgeTTSClient(true);
+              }
+
+              const client = edgeTtsClientRef.current;
+              const textToPreload = event.data;
+              console.log('Received preload request for:', textToPreload);
+
+              // Sanitize text to avoid issues with special characters
+              const sanitizedText = sanitizeTextForEdgeTTS(textToPreload);
+
+              await client.setMetadata(
+                tts.voice.identifier,
+                OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+              );
+
+              const prosodyOptions = {
+                rate: tts.rate || 1.0,
+                pitch: tts.pitch ? `${(tts.pitch - 1) * 100}%` : '+0%',
+                volume: 100.0,
+              };
+
+              const tempFilePath =
+                FileSystem.cacheDirectory + `tts_preload_${Date.now()}.mp3`;
+              const audioChunks: Uint8Array[] = [];
+
+              // Use the same retry mechanism we added to the speak handler
+              let retryCount = 0;
+              const maxRetries = 2;
+
+              while (retryCount <= maxRetries) {
+                try {
+                  const ttsStream = client.toStream(
+                    sanitizedText,
+                    prosodyOptions,
+                  );
+
+                  await new Promise<void>((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                      reject(new Error('TTS preload request timed out'));
+                    }, 15000);
+
+                    ttsStream.on('data', (chunk: Uint8Array) =>
+                      audioChunks.push(chunk),
+                    );
+                    ttsStream.on('end', async () => {
+                      clearTimeout(timeout);
+                      try {
+                        const totalLength = audioChunks.reduce(
+                          (acc, val) => acc + val.length,
+                          0,
+                        );
+                        const concatenatedAudio = new Uint8Array(totalLength);
+                        let offset = 0;
+                        for (const chunk of audioChunks) {
+                          concatenatedAudio.set(chunk, offset);
+                          offset += chunk.length;
+                        }
+                        const base64Data =
+                          uint8ArrayToBase64(concatenatedAudio);
+                        await FileSystem.writeAsStringAsync(
+                          tempFilePath,
+                          base64Data,
+                          { encoding: FileSystem.EncodingType.Base64 },
+                        );
+                        console.log(
+                          'Preload stream finished, file written:',
+                          tempFilePath,
+                        );
+                        resolve();
+                      } catch (error) {
+                        reject(error);
+                      }
+                    });
+                    ttsStream.on('close', () => {
+                      clearTimeout(timeout);
+                      reject(new Error('WebSocket closed during preload'));
+                    });
+                  });
+
+                  // Load the sound but DONT play
+                  const { sound: preloadedSound } =
+                    await Audio.Sound.createAsync(
+                      { uri: tempFilePath },
+                      { shouldPlay: false },
+                    );
+
+                  // Store the preloaded sound and its text
+                  preloadedSoundRef.current = {
+                    text: textToPreload,
+                    sound: preloadedSound,
+                    filePath: tempFilePath,
+                  };
+
+                  console.log(
+                    'Sound preloaded successfully for:',
+                    textToPreload,
+                  );
+                  break;
+                } catch (error) {
+                  retryCount++;
+                  if (retryCount > maxRetries) {
+                    throw error;
+                  }
+                  console.log(
+                    `EdgeTTS preload attempt ${retryCount} failed, retrying...`,
+                  );
+                  client.close();
+                  edgeTtsClientRef.current = new EdgeTTSClient(true);
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
+              }
+            } catch (error) {
+              console.error('EdgeTTS Preload Error:', error);
+              await unloadPreloadedSound();
+            }
+          }
+          return true;
+
         case 'speak':
           if (typeof event.data === 'string' && event.data.trim()) {
             setupSleepTimer();
@@ -338,32 +574,205 @@ export const useWebViewTTS = (
               sleepTimerActive.current ||
               !currentGeneralSettings.TTSSleepTimer
             ) {
-              Speech.speak(event.data, {
-                onDone: () => {
-                  if (webViewRef.current) {
-                    webViewRef.current.injectJavaScript('tts.next?.()');
-                  }
-                },
-                onError: error => {
-                  console.error('Speech Error:', error);
-                  webViewRef.current?.injectJavaScript('tts.stop("error");');
-                },
-                voice: currentReaderSettings.tts?.voice?.identifier,
-                pitch: currentReaderSettings.tts?.pitch || 1,
-                rate: currentReaderSettings.tts?.rate || 1,
-              });
-            } else {
-              webViewRef.current?.injectJavaScript(
-                'tts.stop("timer_expired");',
+              Speech.stop();
+              await unloadSound();
+
+              const textToSpeak = event.data;
+              console.log(
+                `Received speak request for [${ttsProvider}]:`,
+                textToSpeak,
               );
+
+              // Route based on provider
+              if (ttsProvider === 'Edge' && tts?.voice?.identifier) {
+                // Simple Edge TTS implementation
+                try {
+                  // Check if we have this text already preloaded
+                  if (
+                    preloadedSoundRef.current &&
+                    preloadedSoundRef.current.text === textToSpeak
+                  ) {
+                    console.log('Using preloaded sound for:', textToSpeak);
+                    // Move preloaded sound to current audio ref
+                    audioSoundRef.current = preloadedSoundRef.current.sound;
+                    preloadedSoundRef.current = null; // Clear the reference
+
+                    // Set up a listener for completion
+                    audioSoundRef.current.setOnPlaybackStatusUpdate(status => {
+                      if (status.isLoaded && status.didJustFinish) {
+                        // Call next on the webview
+                        webViewRef.current?.injectJavaScript('tts.next()');
+                        // Clean up
+                        unloadSound();
+                      }
+                    });
+
+                    // Start playback
+                    await audioSoundRef.current.playAsync();
+                    return true;
+                  }
+
+                  await unloadPreloadedSound(); // Clean up any preloaded audio
+
+                  if (!edgeTtsClientRef.current) {
+                    edgeTtsClientRef.current = new EdgeTTSClient(true);
+                  }
+
+                  const client = edgeTtsClientRef.current;
+                  await client.setMetadata(
+                    tts.voice.identifier,
+                    OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+                  );
+
+                  // Sanitize text to avoid issues with special characters
+                  const sanitizedText = sanitizeTextForEdgeTTS(textToSpeak);
+
+                  const prosodyOptions = {
+                    rate: tts.rate || 1.0,
+                    pitch: tts.pitch ? `${(tts.pitch - 1) * 100}%` : '+0%',
+                    volume: 100.0,
+                  };
+
+                  const tempFilePath =
+                    FileSystem.cacheDirectory + `tts_${Date.now()}.mp3`;
+                  const audioChunks: Uint8Array[] = [];
+
+                  // Try with retries if needed
+                  let retryCount = 0;
+                  const maxRetries = 2;
+
+                  while (retryCount <= maxRetries) {
+                    try {
+                      const ttsStream = client.toStream(
+                        sanitizedText,
+                        prosodyOptions,
+                      );
+
+                      await new Promise<void>((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                          reject(new Error('TTS request timed out'));
+                        }, 15000); // 15 second timeout
+
+                        ttsStream.on('data', (chunk: Uint8Array) =>
+                          audioChunks.push(chunk),
+                        );
+                        ttsStream.on('end', async () => {
+                          clearTimeout(timeout);
+                          try {
+                            const totalLength = audioChunks.reduce(
+                              (acc, val) => acc + val.length,
+                              0,
+                            );
+                            const concatenatedAudio = new Uint8Array(
+                              totalLength,
+                            );
+                            let offset = 0;
+                            for (const chunk of audioChunks) {
+                              concatenatedAudio.set(chunk, offset);
+                              offset += chunk.length;
+                            }
+                            const base64Data =
+                              uint8ArrayToBase64(concatenatedAudio);
+                            await FileSystem.writeAsStringAsync(
+                              tempFilePath,
+                              base64Data,
+                              { encoding: FileSystem.EncodingType.Base64 },
+                            );
+                            resolve();
+                          } catch (error) {
+                            reject(error);
+                          }
+                        });
+                        ttsStream.on('close', () => {
+                          clearTimeout(timeout);
+                          reject(new Error('WebSocket closed'));
+                        });
+                      });
+
+                      // If we got here, success!
+                      break;
+                    } catch (error) {
+                      retryCount++;
+                      if (retryCount > maxRetries) {
+                        throw error; // Rethrow if we've exhausted retries
+                      }
+                      console.log(
+                        `EdgeTTS attempt ${retryCount} failed, retrying...`,
+                      );
+                      // Close old connection and create new one
+                      client.close();
+                      edgeTtsClientRef.current = new EdgeTTSClient(true);
+                      await new Promise(resolve => setTimeout(resolve, 500)); // Wait briefly before retry
+                    }
+                  }
+
+                  // Create and play the audio
+                  const { sound } = await Audio.Sound.createAsync(
+                    { uri: tempFilePath },
+                    { shouldPlay: true },
+                  );
+
+                  audioSoundRef.current = sound;
+
+                  // Set up a listener for completion - SIMPLIFIED
+                  sound.setOnPlaybackStatusUpdate(status => {
+                    if (status.isLoaded && status.didJustFinish) {
+                      // Important: call next on the webview
+                      webViewRef.current?.injectJavaScript('tts.next()');
+                      // Clean up
+                      unloadSound();
+                    }
+                  });
+                } catch (error) {
+                  console.error('EdgeTTS Error:', error);
+                  // If Edge TTS fails, try falling back to system TTS
+                  try {
+                    Speech.speak(textToSpeak, {
+                      onDone: () => {
+                        webViewRef.current?.injectJavaScript('tts.next()');
+                      },
+                      onError: error => {
+                        console.error('Speech Error:', error);
+                        webViewRef.current?.injectJavaScript(
+                          'tts.stop("error")',
+                        );
+                      },
+                      pitch: tts?.pitch || 1,
+                      rate: tts?.rate || 1,
+                    });
+                  } catch (fallbackError) {
+                    console.error('Fallback TTS also failed:', fallbackError);
+                    webViewRef.current?.injectJavaScript('tts.stop("error")');
+                  }
+                }
+              } else {
+                // System TTS - simplified approach like the original
+                Speech.speak(textToSpeak, {
+                  onDone: () => {
+                    webViewRef.current?.injectJavaScript('tts.next()');
+                  },
+                  onError: error => {
+                    console.error('Speech Error:', error);
+                    webViewRef.current?.injectJavaScript('tts.stop("error")');
+                  },
+                  voice: tts?.voice?.identifier,
+                  pitch: tts?.pitch || 1,
+                  rate: tts?.rate || 1,
+                });
+              }
+            } else {
+              webViewRef.current?.injectJavaScript('tts.stop("timer_expired")');
             }
           } else {
-            webViewRef.current?.injectJavaScript('tts.next?.()');
+            // Empty speak event, just advance
+            webViewRef.current?.injectJavaScript('tts.next()');
           }
           return true;
 
         case 'stop-speak':
           Speech.stop();
+          await unloadSound();
+          await unloadPreloadedSound();
           const reason = event.data as string | undefined;
 
           if (reason === 'pause') {
@@ -402,26 +811,25 @@ export const useWebViewTTS = (
               !currentGeneralSettings.TTSSleepTimer
             ) {
               webViewRef.current?.injectJavaScript(`
-                    if (typeof tts !== 'undefined' && !tts.reading) {
-                        tts.stop('auto_transition');
-                        tts.currentElement = reader.chapterElement;
-                        tts.prevElement = null;
-                        tts.started = false;
-                        tts.reading = false;
-                        setTimeout(() => {
-                            tts.next();
-                            try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = pauseIcon; } catch(e){}
-                            reader.post({ type: 'tts-auto-start-success' });
-                        }, 100);
-                    } else if (typeof tts !== 'undefined' && tts.reading) {
-                    }
-                `);
+                if (typeof tts !== 'undefined' && !tts.reading) {
+                  tts.stop('auto_transition');
+                  tts.currentElement = reader.chapterElement;
+                  tts.prevElement = null;
+                  tts.started = false;
+                  tts.reading = false;
+                  setTimeout(() => {
+                    tts.next();
+                    try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = pauseIcon; } catch(e){}
+                    reader.post({ type: 'tts-auto-start-success' });
+                  }, 100);
+                }
+              `);
             } else {
               webViewRef.current?.injectJavaScript(`
-                    if(typeof tts !== 'undefined' && !tts.reading){
-                        try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
-                    }
-                  `);
+                if(typeof tts !== 'undefined' && !tts.reading){
+                  try { document.getElementById('TTS-Controller').firstElementChild.innerHTML = volumnIcon; } catch(e){}
+                }
+              `);
             }
           }
           return true;
@@ -437,22 +845,8 @@ export const useWebViewTTS = (
           return false;
       }
     },
-    [webViewRef, setupSleepTimer, handleTTSComplete, clearLocalTimers],
+    [setupSleepTimer, handleTTSComplete, webViewRef, stopTTSAndClearState],
   );
-
-  // Function to explicitly stop TTS and clear all associated state
-  const stopTTSAndClearState = useCallback(() => {
-    Speech.stop();
-    clearLocalTimers();
-    setSleepTimerExpiry(null);
-    sleepTimerActive.current = false;
-    shouldAutoStartTTS.current = false;
-    setShouldAutoStartTTS(false);
-    const currentGeneralSettings =
-      getMMKVObject<ChapterGeneralSettings>(CHAPTER_GENERAL_SETTINGS) ||
-      initialChapterGeneralSettings;
-    setChaptersReadCount(0, currentGeneralSettings);
-  }, [clearLocalTimers]);
 
   return { injectTTSLogic, processTTSMessage, stopTTSAndClearState };
 };

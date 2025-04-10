@@ -122,7 +122,7 @@ const WebViewReader: React.FC<WebViewReaderProps> = ({
   }, [webViewRef]);
 
   const handleMessage = useCallback(
-    (ev: { nativeEvent: { data: string } }) => {
+    async (ev: { nativeEvent: { data: string } }) => {
       let event: WebViewPostEvent;
       try {
         event = JSON.parse(ev.nativeEvent.data);
@@ -131,7 +131,7 @@ const WebViewReader: React.FC<WebViewReaderProps> = ({
         return;
       }
 
-      const ttsHandled = processTTSMessage(event);
+      const ttsHandled = await processTTSMessage(event);
       if (ttsHandled) {
         return;
       }
