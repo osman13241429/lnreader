@@ -7,6 +7,7 @@ import {
   Linking,
   StyleSheet,
 } from 'react-native';
+import { StackScreenProps } from '@react-navigation/stack';
 
 import { Appbar, Button, List } from '@components';
 import { useTheme } from '@hooks/persisted';
@@ -27,8 +28,15 @@ import { showToast } from '@utils/showToast';
 import { testConnection } from '@services/translation/TranslationService';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { fixTranslationColumn } from '@services/migration/DatabaseMigration';
+import { SettingsStackParamList } from '@navigators/types';
+import { StringMap } from '@strings/types';
 
-const TranslationSettings = ({ navigation }) => {
+type TranslationSettingsProps = StackScreenProps<
+  SettingsStackParamList,
+  'TranslationSettings'
+>;
+
+const TranslationSettings = ({ navigation }: TranslationSettingsProps) => {
   const theme = useTheme();
   const {
     apiKey,
@@ -45,6 +53,25 @@ const TranslationSettings = ({ navigation }) => {
   const [isTesting, setIsTesting] = useState(false);
   const [isFixingDb, setIsFixingDb] = useState(false);
 
+  const styles = StyleSheet.create({
+    card: {
+      margin: 16,
+      marginTop: 8,
+      backgroundColor: theme.surfaceVariant,
+    },
+    link: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    modelOption: {
+      paddingVertical: 8,
+    },
+    divider: {
+      marginVertical: 8,
+      backgroundColor: theme.outlineVariant,
+    },
+  });
+
   const saveSettings = async () => {
     try {
       setIsSaving(true);
@@ -53,10 +80,10 @@ const TranslationSettings = ({ navigation }) => {
         model: modelInput,
         defaultInstruction: instructionInput,
       });
-      showToast(getString('translation.settingsSaved'));
+      showToast(getString('translation.settingsSaved' as keyof StringMap));
     } catch (error) {
       showToast(
-        `${getString('common.error')}: ${
+        `${getString('common.error' as keyof StringMap)}: ${
           error instanceof Error ? error.message : 'Unknown error'
         }`,
       );
@@ -70,7 +97,6 @@ const TranslationSettings = ({ navigation }) => {
       setIsTesting(true);
       const result = await testConnection(apiKeyInput, modelInput);
 
-      // Show result in an alert for better visibility
       Alert.alert(
         result.success
           ? 'Connection Test Successful'
@@ -93,6 +119,7 @@ const TranslationSettings = ({ navigation }) => {
     try {
       setIsFixingDb(true);
       await fixTranslationColumn();
+      showToast('Database fix attempt finished.');
     } catch (error) {
       showToast(
         `Database fix failed: ${
@@ -105,15 +132,37 @@ const TranslationSettings = ({ navigation }) => {
   };
 
   const handleDeleteAllTranslations = async () => {
-    try {
-      await deleteAllTranslations();
-      showToast(getString('translation.allDeleted', { count: '?' }));
-    } catch (error) {
-      showToast(getString('translation.deleteError', { error: error.message }));
-    }
+    Alert.alert(
+      'Delete All Translations',
+      'Are you sure you want to delete all stored translations? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const deletedCount = await deleteAllTranslations();
+              showToast(
+                getString('translation.allDeleted' as keyof StringMap, {
+                  count: deletedCount,
+                }),
+              );
+            } catch (error) {
+              showToast(
+                getString('translation.deleteError' as keyof StringMap, {
+                  error:
+                    error instanceof Error ? error.message : 'Unknown error',
+                }),
+              );
+            }
+          },
+        },
+      ],
+    );
   };
 
-  const setRecommendedModel = modelId => {
+  const setRecommendedModel = (modelId: string) => {
     setModelInput(modelId);
     showToast(`Model set to ${modelId}`);
   };
@@ -129,19 +178,19 @@ const TranslationSettings = ({ navigation }) => {
   return (
     <>
       <Appbar
-        title={getString('translation.settings')}
+        title={getString('translation.settings' as keyof StringMap)}
         handleGoBack={navigation.goBack}
         theme={theme}
       />
       <ScrollView style={{ flex: 1, backgroundColor: theme.background }}>
         <List.Section>
           <List.SubHeader theme={theme}>
-            {getString('translation.apiSettings')}
+            {getString('translation.apiSettings' as keyof StringMap)}
           </List.SubHeader>
 
           <Card style={styles.card}>
             <Card.Content>
-              <Text style={{ color: theme.onSurface, marginBottom: 8 }}>
+              <Text style={{ color: theme.onSurfaceVariant, marginBottom: 8 }}>
                 To use translation, you need an OpenRouter API key:
               </Text>
               <TouchableRipple onPress={openOpenRouterWebsite}>
@@ -156,11 +205,19 @@ const TranslationSettings = ({ navigation }) => {
           </Card>
 
           <TextInput
-            label={getString('translation.apiKey')}
+            label={getString('translation.apiKey' as keyof StringMap)}
             value={apiKeyInput}
             onChangeText={setApiKeyInput}
             style={{ margin: 16, backgroundColor: theme.surface }}
-            theme={{ colors: { primary: theme.primary } }}
+            theme={{
+              ...theme,
+              colors: {
+                ...theme,
+                placeholder: theme.onSurface,
+                text: theme.onSurface,
+                primary: theme.primary,
+              },
+            }}
             secureTextEntry
           />
 
@@ -171,7 +228,7 @@ const TranslationSettings = ({ navigation }) => {
               color: theme.onSurface,
             }}
           >
-            {getString('translation.model')}
+            {getString('translation.model' as keyof StringMap)}
           </Text>
           <ModelDropdown
             value={modelInput}
@@ -180,20 +237,21 @@ const TranslationSettings = ({ navigation }) => {
           />
 
           <Card style={{ ...styles.card, marginBottom: 16 }}>
-            <Card.Title title="Recommended Models" />
+            <Card.Title
+              title="Recommended Models"
+              titleStyle={{ color: theme.onSurface }}
+            />
             <Card.Content>
               <TouchableRipple
-                onPress={() =>
-                  setRecommendedModel('anthropic/claude-3-haiku-20240307')
-                }
+                onPress={() => setRecommendedModel('openrouter/optimus-alpha')}
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    Claude 3 Haiku
+                    Optimus Alpha, currently free. Probably made by OpenAI.
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    Good for translations, wider availability
+                    The best model available, currently free.
                   </Text>
                 </View>
               </TouchableRipple>
@@ -202,16 +260,17 @@ const TranslationSettings = ({ navigation }) => {
 
               <TouchableRipple
                 onPress={() =>
-                  setRecommendedModel('anthropic/claude-3-sonnet-20240229')
+                  setRecommendedModel('deepseek/deepseek-chat-v3-0324:free')
                 }
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    Claude 3 Sonnet
+                    DeepSeek Chat (Free Tier)
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    Better quality, costs more
+                    Made by DeepSeek. Probably the best Model available,
+                    currently free.
                   </Text>
                 </View>
               </TouchableRipple>
@@ -219,15 +278,15 @@ const TranslationSettings = ({ navigation }) => {
               <Divider style={styles.divider} />
 
               <TouchableRipple
-                onPress={() => setRecommendedModel('openai/gpt-3.5-turbo')}
+                onPress={() => setRecommendedModel('qwen/qwq-32b:free')}
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    GPT-3.5 Turbo
+                    Qwen QWQ 32B (Free Tier)
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    Cheaper option, lower quality
+                    Another free option.
                   </Text>
                 </View>
               </TouchableRipple>
@@ -251,11 +310,19 @@ const TranslationSettings = ({ navigation }) => {
           </Card>
 
           <TextInput
-            label={getString('translation.instruction')}
+            label={getString('translation.instruction' as keyof StringMap)}
             value={instructionInput}
             onChangeText={setInstructionInput}
             style={{ margin: 16, backgroundColor: theme.surface }}
-            theme={{ colors: { primary: theme.primary } }}
+            theme={{
+              ...theme,
+              colors: {
+                ...theme,
+                placeholder: theme.onSurface,
+                text: theme.onSurface,
+                primary: theme.primary,
+              },
+            }}
             multiline
             numberOfLines={4}
           />
@@ -268,7 +335,11 @@ const TranslationSettings = ({ navigation }) => {
             }}
           >
             <Button
-              title={isSaving ? '...' : getString('translation.saveSettings')}
+              title={
+                isSaving
+                  ? '...'
+                  : getString('translation.saveSettings' as keyof StringMap)
+              }
               onPress={saveSettings}
               mode="contained"
               style={{ flex: 1, marginRight: 8 }}
@@ -307,10 +378,10 @@ const TranslationSettings = ({ navigation }) => {
 
         <List.Section>
           <List.SubHeader theme={theme}>
-            {getString('translation.options')}
+            {getString('translation.options' as keyof StringMap)}
           </List.SubHeader>
           <SettingSwitch
-            label={getString('translation.autoTranslate')}
+            label={getString('translation.autoTranslate' as keyof StringMap)}
             value={autoTranslate}
             onPress={() =>
               setTranslationSettings({ autoTranslate: !autoTranslate })
@@ -318,18 +389,22 @@ const TranslationSettings = ({ navigation }) => {
             theme={theme}
           />
           <Button
-            title={getString('translation.manageTranslations')}
+            title={getString(
+              'translation.manageTranslations' as keyof StringMap,
+            )}
             onPress={() => navigation.navigate('TranslationList')}
             mode="contained"
             style={{ margin: 16 }}
-            color={theme.primary}
+            buttonColor={theme.primary}
+            textColor={theme.onPrimary}
           />
           <Button
-            title={getString('translation.deleteAll')}
+            title={getString('translation.deleteAll' as keyof StringMap)}
             onPress={handleDeleteAllTranslations}
             mode="outlined"
             style={{ margin: 16 }}
-            color={theme.error}
+            buttonColor={theme.surface}
+            textColor={theme.error}
           />
         </List.Section>
 
@@ -337,7 +412,7 @@ const TranslationSettings = ({ navigation }) => {
           <List.SubHeader theme={theme}>Troubleshooting</List.SubHeader>
           <Card style={styles.card}>
             <Card.Content>
-              <Text style={{ color: theme.onSurface, marginBottom: 12 }}>
+              <Text style={{ color: theme.onSurfaceVariant, marginBottom: 12 }}>
                 If you see "no such column: hasTranslation" errors, use this
                 button to fix the database:
               </Text>
@@ -345,7 +420,8 @@ const TranslationSettings = ({ navigation }) => {
                 title={isFixingDb ? 'Fixing Database...' : 'Fix Database'}
                 onPress={handleFixDatabase}
                 mode="contained"
-                color={theme.primary}
+                buttonColor={theme.primary}
+                textColor={theme.onPrimary}
                 disabled={isFixingDb}
               />
               {isFixingDb && (
@@ -362,22 +438,5 @@ const TranslationSettings = ({ navigation }) => {
     </>
   );
 };
-
-const styles = StyleSheet.create({
-  card: {
-    margin: 16,
-    marginTop: 8,
-  },
-  link: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modelOption: {
-    paddingVertical: 8,
-  },
-  divider: {
-    marginVertical: 8,
-  },
-});
 
 export default TranslationSettings;
