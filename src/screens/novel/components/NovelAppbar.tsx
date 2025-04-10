@@ -20,6 +20,7 @@ const NovelAppbar = ({
   showEditInfoModal,
   downloadCustomChapterModal,
   setCustomNovelCover,
+  refreshNovelCover,
   goBack,
   shareNovel,
   showJumpToChapterModal,
@@ -34,6 +35,7 @@ const NovelAppbar = ({
   showEditInfoModal: React.Dispatch<React.SetStateAction<boolean>>;
   downloadCustomChapterModal: () => void;
   setCustomNovelCover: () => Promise<void>;
+  refreshNovelCover: () => Promise<void>;
   goBack: () => void;
   shareNovel: () => void;
   showJumpToChapterModal: (arg: boolean) => void;
@@ -192,6 +194,19 @@ const NovelAppbar = ({
               setCustomNovelCover();
             }}
           />
+          {!isLocal && (
+            <Menu.Item
+              title={getString('novelScreen.refreshCover')}
+              style={{ backgroundColor: theme.surface2 }}
+              titleStyle={{
+                color: theme.onSurface,
+              }}
+              onPress={async () => {
+                showExtraMenu(false);
+                await refreshNovelCover();
+              }}
+            />
+          )}
         </Menu>
       </Appbar.Header>
     </Animated.View>

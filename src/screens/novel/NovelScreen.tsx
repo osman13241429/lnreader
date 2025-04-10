@@ -55,14 +55,12 @@ import { useTranslationSettings } from '@hooks/persisted/useSettings';
 import ServiceManager, { BackgroundTask } from '@services/ServiceManager';
 import FileManager from '@native/FileManager';
 import { NOVEL_STORAGE } from '@utils/Storages';
+import { refreshNovelCover } from '@database/queries/NovelQueries';
+import { RootStackParamList } from '@navigators/types';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
 
 // Define the type here since the import is missing
-type RootStackParamList = {
-  Novel: { name: string; path: string; pluginId: string };
-  Chapter: { novel: any; chapter: ChapterInfo };
-  // other routes as needed
-};
-
 type NovelScreenProps = StackScreenProps<RootStackParamList, 'Novel'>;
 
 const Novel = ({ route, navigation }: NovelScreenProps) => {
@@ -440,6 +438,86 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
     }
   };
 
+  const handleRefreshNovelCover = async () => {
+    if (novel) {
+      await refreshNovelCover(novel.pluginId, novel.path, novel.id);
+    } else {
+      showToast('Novel data not available yet.');
+    }
+  };
+
+  const handleDownloadCover = async () => {
+    if (!novel?.cover) {
+      showToast('Cover image not available.');
+      return;
+    }
+
+    let temporaryFileUri: string | undefined;
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        showToast(getString('novelScreen.storagePermissionDenied'));
+        return;
+      }
+
+      let fileUri = novel.cover;
+      const isRemote = fileUri.startsWith('http');
+
+      // Download if it's a remote URL
+      if (isRemote) {
+        const fileExtension =
+          novel.cover.split('.').pop()?.split('?')[0] || 'jpg'; // Basic extension check
+        temporaryFileUri =
+          FileSystem.cacheDirectory + `cover_${novel.id}.${fileExtension}`;
+        const { uri: downloadedUri } = await FileSystem.downloadAsync(
+          novel.cover,
+          temporaryFileUri,
+        );
+        fileUri = downloadedUri;
+      } else if (fileUri.startsWith('file://')) {
+        // For local files, MediaLibrary might need the path without 'file://', but createAssetAsync often handles it.
+        // Let's try passing it directly first. If issues arise, use fileUri.substring(7);
+      } else {
+        showToast('Invalid cover URI');
+        return;
+      }
+
+      // Use the potentially downloaded URI or the original local URI
+      const asset = await MediaLibrary.createAssetAsync(fileUri);
+
+      // Optional: Add to album
+      const albumName = 'LNReader';
+      let album = await MediaLibrary.getAlbumAsync(albumName);
+      if (!album) {
+        album = await MediaLibrary.createAlbumAsync(albumName, asset, false);
+      } else {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      }
+
+      showToast(getString('novelScreen.coverSaved'));
+    } catch (error: any) {
+      console.error('[Download Cover] Error:', error);
+      showToast(
+        getString('novelScreen.errorSavingCover', { message: error.message }),
+      );
+    } finally {
+      // Clean up temporary file if downloaded
+      if (
+        temporaryFileUri &&
+        (await FileSystem.getInfoAsync(temporaryFileUri)).exists
+      ) {
+        try {
+          await FileSystem.deleteAsync(temporaryFileUri, { idempotent: true });
+        } catch (cleanupError) {
+          console.error(
+            '[Download Cover] Error cleaning up temp file:',
+            cleanupError,
+          );
+        }
+      }
+    }
+  };
+
   return (
     <Drawer
       open={drawerOpen}
@@ -477,6 +555,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                 isLocal={novel.isLocal}
                 goBack={navigation.goBack}
                 headerOpacity={headerOpacity}
+                refreshNovelCover={handleRefreshNovelCover}
               />
             ) : (
               <Animated.View
@@ -556,6 +635,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                   page={pages.length > 1 ? pages[pageIndex] : undefined}
                   onRefreshPage={onRefreshPage}
                   openDrawer={openDrawer}
+                  handleDownloadCover={handleDownloadCover}
                 />
               }
               refreshControl={refreshControl()}

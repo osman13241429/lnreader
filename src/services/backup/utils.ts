@@ -19,21 +19,27 @@ import FileManager from '@native/FileManager';
 import { ROOT_STORAGE } from '@utils/Storages';
 import ServiceManager from '@services/ServiceManager';
 
-const APP_STORAGE_URI = 'file://' + ROOT_STORAGE;
+export const APP_STORAGE_URI = 'file://' + ROOT_STORAGE;
 
 export const CACHE_DIR_PATH =
   FileManager.ExternalCachesDirectoryPath + '/BackupData';
 
-const backupMMKVData = () => {
+export const backupMMKVData = (excludeApiKeys: boolean = false) => {
   const excludeKeys = [
     ServiceManager.manager.STORE_KEY,
     TRACKER,
     SELF_HOST_BACKUP,
     LAST_UPDATE_TIME,
   ];
-  const keys = MMKVStorage.getAllKeys().filter(
-    key => !excludeKeys.includes(key),
-  );
+  let keys = MMKVStorage.getAllKeys().filter(key => !excludeKeys.includes(key));
+
+  // Filter out API keys if requested
+  if (excludeApiKeys) {
+    // IMPORTANT: Adjust this regex pattern to match your actual API key storage names!
+    const apiKeyPattern = /api_?key|token|secret/i; // Example pattern (case-insensitive)
+    keys = keys.filter(key => !apiKeyPattern.test(key));
+  }
+
   const data = {} as any;
   for (let key of keys) {
     let value: number | string | boolean | undefined =
@@ -48,7 +54,7 @@ const backupMMKVData = () => {
   return data;
 };
 
-const restoreMMKVData = (data: any) => {
+export const restoreMMKVData = (data: any) => {
   for (let key in data) {
     MMKVStorage.set(key, data[key]);
   }

@@ -50,6 +50,7 @@ interface NovelInfoHeaderProps {
   page?: string;
   openDrawer: () => void;
   onRefreshPage: (page: string) => void;
+  handleDownloadCover: () => Promise<void>;
 }
 
 const getStatusIcon = (status?: string) => {
@@ -78,6 +79,7 @@ const NovelInfoHeader = ({
   page,
   openDrawer,
   onRefreshPage,
+  handleDownloadCover,
 }: NovelInfoHeaderProps) => {
   const { hideBackdrop = false } = useAppSettings();
 
@@ -101,6 +103,7 @@ const NovelInfoHeader = ({
             source={{ uri: novel.cover }}
             theme={theme}
             setCustomNovelCover={setCustomNovelCover}
+            handleDownloadCover={handleDownloadCover}
           />
           <View style={styles.novelDetails}>
             <Row>

@@ -8,16 +8,18 @@ import {
   Dimensions,
   StatusBar,
   ImageBackground,
+  Image,
+  ImageURISource,
 } from 'react-native';
 import color from 'color';
 import { IconButton, Portal } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Image, ImageURISource } from 'react-native';
 import { TouchableWithoutFeedback } from 'react-native-gesture-handler';
 import { Chip } from '../../../../components';
 import { coverPlaceholderColor } from '../../../../theme/colors';
 import { ThemeColors } from '@theme/types';
 import { getString } from '@strings/translations';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface CoverImageProps {
   children: React.ReactNode;
@@ -30,6 +32,7 @@ interface NovelThumbnailProps {
   source: ImageURISource;
   theme: ThemeColors;
   setCustomNovelCover: () => Promise<void>;
+  handleDownloadCover: () => Promise<void>;
 }
 
 interface NovelTitleProps {
@@ -81,8 +84,10 @@ const NovelThumbnail = ({
   source,
   theme,
   setCustomNovelCover,
+  handleDownloadCover,
 }: NovelThumbnailProps) => {
   const [expanded, setExpanded] = useState(false);
+  const { bottom: bottomInset } = useSafeAreaInsets();
 
   if (!expanded) {
     return (
@@ -93,35 +98,47 @@ const NovelThumbnail = ({
   } else {
     return (
       <Portal>
-        <IconButton
-          icon="pencil-outline"
-          style={{
-            position: 'absolute',
-            top: StatusBar.currentHeight ?? 0 + 10,
-            right: 10,
-            zIndex: 10,
-          }}
-          iconColor={theme.onBackground}
-          onPress={setCustomNovelCover}
-        />
         <Pressable
-          style={{
-            position: 'absolute',
-            width: Dimensions.get('window').width,
-            height: Dimensions.get('window').height + 60,
-            justifyContent: 'center',
-            backgroundColor: 'rgba(0,0,0,0.7)',
-          }}
+          style={styles.fullscreenContainer}
           onPress={() => setExpanded(false)}
         >
           <Image
             source={source}
-            style={{
-              width: Dimensions.get('window').width,
-              height: (Dimensions.get('window').width * 3) / 2,
-            }}
+            style={styles.fullscreenImage}
+            resizeMode="contain"
           />
         </Pressable>
+
+        <View
+          style={[styles.bottomBarContainer, { paddingBottom: bottomInset }]}
+        >
+          <View style={styles.bottomBarContent}>
+            <IconButton
+              icon="close"
+              iconColor={theme.onPrimary}
+              size={26}
+              onPress={() => setExpanded(false)}
+              style={styles.bottomBarButton}
+            />
+            <IconButton
+              icon="download"
+              iconColor={theme.onPrimary}
+              size={26}
+              onPress={handleDownloadCover}
+              style={styles.bottomBarButton}
+            />
+            <IconButton
+              icon="image-edit"
+              iconColor={theme.onPrimary}
+              size={26}
+              onPress={async () => {
+                await setCustomNovelCover();
+                setExpanded(false);
+              }}
+              style={styles.bottomBarButton}
+            />
+          </View>
+        </View>
       </Portal>
     );
   }
@@ -289,7 +306,7 @@ const styles = StyleSheet.create({
   novelThumbnail: {
     height: 150,
     width: 100,
-    marginHorizontal: 4,
+    marginRight: 16,
     borderRadius: 6,
     backgroundColor: coverPlaceholderColor,
   },
@@ -322,5 +339,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     borderRadius: 50,
     textTransform: 'capitalize',
+  },
+  fullscreenContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height + (StatusBar.currentHeight || 0),
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    zIndex: 1,
+  },
+  fullscreenImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  },
+  bottomBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    zIndex: 10,
+  },
+  bottomBarContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  bottomBarButton: {
+    margin: 0,
   },
 });

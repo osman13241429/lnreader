@@ -368,13 +368,18 @@ const restoreObjectQuery = (table: string, obj: any) => {
 
 export const _restoreNovelAndChapters = async (backupNovel: BackupNovel) => {
   const { chapters, ...novel } = backupNovel;
-  await new Promise(resolve => {
+  await new Promise<void>((resolve, reject) => {
     db.transaction(tx => {
       tx.executeSql('DELETE FROM Novel WHERE id = ?', [novel.id]);
       tx.executeSql(
         restoreObjectQuery('Novel', novel),
         Object.values(novel) as string[] | number[],
-        () => resolve(null),
+        () => resolve(),
+        (txObj, error) => {
+          console.error('Error inserting Novel during restore:', error);
+          reject(error);
+          return false;
+        },
       );
     });
   });
@@ -386,4 +391,58 @@ export const _restoreNovelAndChapters = async (backupNovel: BackupNovel) => {
       );
     }
   });
+};
+
+export const refreshNovelCover = async (
+  pluginId: string,
+  novelPath: string,
+  novelId: number,
+): Promise<string | undefined> => {
+  try {
+    const sourceNovel = await fetchNovel(pluginId, novelPath);
+
+    if (!sourceNovel.cover) {
+      showToast('No cover found in source');
+      return;
+    }
+
+    const novelDir = `${NOVEL_STORAGE}/${pluginId}/${novelId}`;
+    const novelCoverPath = `${novelDir}/cover.png`;
+    const novelCoverUri = `file://${novelCoverPath}?${Date.now()}`; // Add timestamp to bust cache
+
+    if (!(await FileManager.exists(novelDir))) {
+      await FileManager.mkdir(novelDir);
+    }
+
+    await downloadFile(
+      sourceNovel.cover,
+      novelCoverPath,
+      getPlugin(pluginId)?.imageRequestInit,
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      db.transaction(tx => {
+        tx.executeSql(
+          'UPDATE Novel SET cover = ? WHERE id = ?',
+          [novelCoverUri, novelId],
+          () => {
+            showToast('Cover updated');
+            resolve();
+          },
+          (txObj, error) => {
+            console.error('[Refresh Cover] Error updating database:', error);
+            showToast('Error updating cover in database');
+            reject(error);
+            return false;
+          },
+        );
+      });
+    });
+
+    return novelCoverUri; // Return the new URI so the UI can potentially update
+  } catch (error: any) {
+    console.error('[Refresh Cover] Error refreshing cover:', error);
+    showToast(`Error refreshing cover: ${error.message}`);
+    return undefined;
+  }
 };

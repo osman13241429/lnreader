@@ -153,23 +153,20 @@ export const getAllNovelCategories = (): Promise<NovelCategory[]> => {
 };
 
 export const _restoreCategory = (category: BackupCategory) => {
+  // Delete existing category with the same ID or sort order first to avoid conflicts
   db.transaction(tx => {
     tx.executeSql('DELETE FROM Category WHERE id = ? OR sort = ?', [
       category.id,
       category.sort,
     ]);
   });
+  // Insert the category details
   db.transaction(tx => {
     tx.executeSql('INSERT INTO Category (id, name, sort) VALUES (?, ?, ?)', [
       category.id,
       category.name,
       category.sort,
     ]);
-    for (const novelId of category.novelIds) {
-      tx.executeSql(
-        'INSERT INTO NovelCategory (categoryId, novelId) VALUES (?, ?)',
-        [category.id, novelId],
-      );
-    }
+    // NovelCategory linking happens in restoreFromBackupData after novels are restored
   });
 };
