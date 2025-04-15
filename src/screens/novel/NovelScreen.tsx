@@ -195,9 +195,95 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
       downloadChapters(novel, filtered);
     }
   };
+
   const deleteChs = () => {
     deleteChapters(chapters.filter(c => c.isDownloaded));
   };
+
+  const deleteTranslations = async (amount: 'selected' | 'all') => {
+    if (!novel) {
+      return;
+    }
+
+    try {
+      let chaptersToProcess: ChapterInfo[] = [];
+
+      if (amount === 'all') {
+        chaptersToProcess = chapters.filter(chapter => chapter.hasTranslation);
+      } else if (amount === 'selected' && selected.length > 0) {
+        chaptersToProcess = selected.filter(chapter => chapter.hasTranslation);
+      } else {
+        showToast(getString('translation.noChaptersSelected'));
+        return;
+      }
+
+      if (chaptersToProcess.length === 0) {
+        showToast(getString('translation.noTranslationsFound'));
+        return;
+      }
+
+      let successCount = 0;
+      const chapterIds = chaptersToProcess.map(chapter => chapter.id);
+      const chapterIdsStr = chapterIds.join(',');
+
+      // Delete from Translation table
+      await new Promise<void>((resolve, reject) => {
+        require('@database/db').db.transaction((tx: any) => {
+          tx.executeSql(
+            `DELETE FROM Translation WHERE chapterId IN (${chapterIdsStr})`,
+            [],
+            (_, resultSet: any) => {
+              successCount = resultSet.rowsAffected || 0;
+              resolve();
+            },
+            (_: any, error: any) => {
+              reject(error);
+              return false;
+            },
+          );
+        });
+      });
+
+      // Update Chapter table if deletions were successful
+      if (successCount > 0) {
+        await new Promise<void>((resolve, reject) => {
+          require('@database/db').db.transaction((tx: any) => {
+            tx.executeSql(
+              `UPDATE Chapter SET hasTranslation = 0 WHERE id IN (${chapterIdsStr})`,
+              [],
+              () => {
+                resolve();
+              },
+              (_: any, error: any) => {
+                reject(error);
+                return false;
+              },
+            );
+          });
+        });
+
+        // Show appropriate toast message based on count
+        if (successCount === 1) {
+          showToast(getString('translation.translationDeleted'));
+        } else {
+          showToast(
+            getString('translation.translationsDeleted', {
+              count: successCount,
+            }),
+          );
+        }
+
+        // Clear selection and refresh chapter list
+        setSelected([]);
+        refreshChapters();
+      } else {
+        showToast('No translations were deleted from the database');
+      }
+    } catch (error) {
+      showToast(getString('common.error'));
+    }
+  };
+
   const shareNovel = () => {
     if (!novel) {
       return;
@@ -289,11 +375,15 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
       }
     }
 
-    if (apiKey && selected.some(obj => obj.isDownloaded)) {
+    // Show translate button if API key exists and any selected chapter lacks translation
+    if (apiKey && selected.some(obj => !obj.hasTranslation)) {
       list.push({
         icon: 'translate',
         onPress: async () => {
-          const chaptersToTranslate = selected;
+          // Filter for chapters needing translation (regardless of download status)
+          const chaptersToTranslate = selected.filter(
+            chapter => !chapter.hasTranslation,
+          );
           if (chaptersToTranslate.length > 0 && novel && apiKey) {
             showToast(
               `Adding ${chaptersToTranslate.length} translation tasks to queue...`,
@@ -343,9 +433,18 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
               ServiceManager.manager.addTask(tasksToAdd);
             }
           } else if (!apiKey) {
-            showToast(safeGetString('translation.noApiKey'));
+            showToast(getString('translation.noApiKey'));
           }
           setSelected([]);
+        },
+      });
+    }
+
+    if (selected.some(obj => obj.hasTranslation)) {
+      list.push({
+        icon: 'translate-off',
+        onPress: () => {
+          deleteTranslations('selected');
         },
       });
     }
@@ -427,14 +526,6 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         ...novel,
         cover: newCover,
       });
-    }
-  };
-
-  const safeGetString = (key: any, options?: any) => {
-    try {
-      return getString(key as any, options);
-    } catch (error) {
-      return key.split('.').pop() || 'ERROR';
     }
   };
 
@@ -545,6 +636,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                 novel={novel}
                 chapters={chapters}
                 deleteChapters={deleteChs}
+                deleteTranslations={deleteTranslations}
                 downloadChapters={downloadChs}
                 showEditInfoModal={showEditInfoModal}
                 setCustomNovelCover={setCustomNovelCover}

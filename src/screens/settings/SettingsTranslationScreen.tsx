@@ -47,7 +47,9 @@ const TranslationSettings = ({ navigation }: TranslationSettingsProps) => {
   } = useTranslationSettings();
 
   const [apiKeyInput, setApiKeyInput] = useState(apiKey);
-  const [modelInput, setModelInput] = useState(model);
+  const [modelInput, setModelInput] = useState(
+    model || 'deepseek/deepseek-chat-v3-0324:free',
+  );
   const [instructionInput, setInstructionInput] = useState(defaultInstruction);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -243,15 +245,17 @@ const TranslationSettings = ({ navigation }: TranslationSettingsProps) => {
             />
             <Card.Content>
               <TouchableRipple
-                onPress={() => setRecommendedModel('openrouter/optimus-alpha')}
+                onPress={() =>
+                  setRecommendedModel('deepseek/deepseek-chat-v3-0324:free')
+                }
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    Optimus Alpha, currently free. Probably made by OpenAI.
+                    DeepSeek Chat v3-0324 (Free Tier)
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    The best model available, currently free.
+                    Good general-purpose translation model.
                   </Text>
                 </View>
               </TouchableRipple>
@@ -260,17 +264,18 @@ const TranslationSettings = ({ navigation }: TranslationSettingsProps) => {
 
               <TouchableRipple
                 onPress={() =>
-                  setRecommendedModel('deepseek/deepseek-chat-v3-0324:free')
+                  setRecommendedModel('deepseek/deepseek-r1-zero:free')
                 }
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    DeepSeek Chat (Free Tier)
+                    DeepSeek R1 Zero (Free Tier)
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    Made by DeepSeek. Probably the best Model available,
-                    currently free.
+                    Another strong free option from DeepSeek. During testing, it
+                    was found to be slightly better than DeepSeek Chat v3-0324
+                    and Gemini 2.5 Pro exp-03-25.
                   </Text>
                 </View>
               </TouchableRipple>
@@ -278,15 +283,18 @@ const TranslationSettings = ({ navigation }: TranslationSettingsProps) => {
               <Divider style={styles.divider} />
 
               <TouchableRipple
-                onPress={() => setRecommendedModel('qwen/qwq-32b:free')}
+                onPress={() =>
+                  setRecommendedModel('google/gemini-2.5-pro-exp-03-25:free')
+                }
                 style={styles.modelOption}
               >
                 <View>
                   <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
-                    Qwen QWQ 32B (Free Tier)
+                    Gemini 2.5 Pro exp-03-25 (Experimental Free Tier)
                   </Text>
                   <Text style={{ color: theme.onSurfaceVariant, fontSize: 12 }}>
-                    Another free option.
+                    Latest experimental model from Google, may have
+                    restrictions. Second best model during testing.
                   </Text>
                 </View>
               </TouchableRipple>

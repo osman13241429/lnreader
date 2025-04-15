@@ -450,6 +450,7 @@
     "epubFilenameHint": "The EPUB file will be saved with this name. You can change it.",
     "epubUseTranslation": "Use Translated Content",
     "epubChapterNumberOnly": "Use Chapter Number Only",
+    "epubChapterNumberOnlyDesc": "Use 'Chapter X' instead of the full chapter title in the EPUB table of contents and headings.",
     "chooseEpubFilename": "EPUB Export Options",
     "refreshCover": "Refresh cover",
     "downloadCover": "Download cover",
@@ -568,7 +569,7 @@
     "exportTranslations": "Export translations",
     "deleteAll": "Delete all translations",
     "settingsSaved": "Translation settings saved",
-    "noApiKey": "Please set an API key in translation settings",
+    "noApiKey": "No API key configured. Please add your API key in settings.",
     "translating": "Translating...",
     "success": "Translation successful",
     "error": "Translation error: {{error}}",
@@ -589,14 +590,18 @@
     "previewText": "Preview",
     "modelUsed": "Model",
     "created": "Created",
-    "noTranslationsFound": "No translations found",
+    "noTranslationsFound": "No translations found to delete",
     "confirmDelete": "Are you sure you want to delete this translation?",
     "batchExported": "Successfully exported {{count}} translations",
-    "selected": "selected",
+    "selected": "Selected",
     "flatView": "Flat List",
     "groupedView": "Group by Novel",
     "exportLocationTitle": "Export Location",
     "appFolder": "App Storage",
-    "downloadFolder": "Downloads Folder"
+    "downloadFolder": "Downloads Folder",
+    "noChaptersSelected": "No chapters selected for translation deletion",
+    "translationsDeleted": "Deleted {{count}} translations",
+    "deleteSelected": "Delete selected translations",
+    "translationDeleted": "Translation deleted"
   }
 }

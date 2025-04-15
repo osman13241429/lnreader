@@ -141,7 +141,7 @@ const ChooseEpubLocationModal: React.FC<ChooseEpubLocationModalProps> = ({
           value={useChapterNumberOnly.value}
           onPress={useChapterNumberOnly.toggle}
           theme={theme}
-          description="Use 'Chapter X' instead of full title"
+          description={getString('novelScreen.epubChapterNumberOnlyDesc')}
         />
       </View>
       <List.InfoItem

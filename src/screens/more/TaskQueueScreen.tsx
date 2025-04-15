@@ -5,6 +5,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import {
   FAB,
@@ -14,6 +15,7 @@ import {
   overlay,
   Checkbox,
   IconButton,
+  Switch,
 } from 'react-native-paper';
 
 import { useTheme } from '@hooks/persisted';
@@ -25,6 +27,15 @@ import { TaskQueueScreenProps } from '@navigators/types';
 import ServiceManager, { QueuedBackgroundTask } from '@services/ServiceManager';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMMKVObject } from 'react-native-mmkv';
+
+const ParallelProcessingWarnings = {
+  downloads:
+    'WARNING: Parallel downloads may cause the source website to block your IP address due to ' +
+    'excessive requests. Use with caution, especially with large numbers of chapters.',
+  translations:
+    'WARNING: Parallel translations may trigger API rate limits, leading to failed requests or ' +
+    'extra charges. Translation APIs typically have strict rate limiting.',
+};
 
 const DownloadQueue = ({ navigation }: TaskQueueScreenProps) => {
   const theme = useTheme();
@@ -39,6 +50,12 @@ const DownloadQueue = ({ navigation }: TaskQueueScreenProps) => {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     new Set(),
   );
+  const [parallelDownloads, setParallelDownloads] = useState(
+    ServiceManager.manager.isParallelDownloadsEnabled,
+  );
+  const [parallelTranslations, setParallelTranslations] = useState(
+    ServiceManager.manager.isParallelTranslationsEnabled,
+  );
 
   const openMenu = () => setVisible(true);
   const closeMenu = () => setVisible(false);
@@ -51,6 +68,70 @@ const DownloadQueue = ({ navigation }: TaskQueueScreenProps) => {
       setSelectedIndices(new Set());
     }
   }, [taskQueueMMKV]);
+
+  const toggleParallelDownloads = useCallback(() => {
+    const newValue = !parallelDownloads;
+
+    if (newValue) {
+      // Show warning when enabling
+      Alert.alert(
+        'Enable Parallel Downloads',
+        ParallelProcessingWarnings.downloads,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Enable Anyway',
+            onPress: () => {
+              ServiceManager.manager.toggleParallelDownloads();
+              setParallelDownloads(true);
+              showToast('Parallel downloads enabled');
+            },
+            style: 'destructive',
+          },
+        ],
+      );
+    } else {
+      // Just disable without warning
+      ServiceManager.manager.toggleParallelDownloads();
+      setParallelDownloads(false);
+      showToast('Parallel downloads disabled');
+    }
+  }, [parallelDownloads]);
+
+  const toggleParallelTranslations = useCallback(() => {
+    const newValue = !parallelTranslations;
+
+    if (newValue) {
+      // Show warning when enabling
+      Alert.alert(
+        'Enable Parallel Translations',
+        ParallelProcessingWarnings.translations,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Enable Anyway',
+            onPress: () => {
+              ServiceManager.manager.toggleParallelTranslations();
+              setParallelTranslations(true);
+              showToast('Parallel translations enabled');
+            },
+            style: 'destructive',
+          },
+        ],
+      );
+    } else {
+      // Just disable without warning
+      ServiceManager.manager.toggleParallelTranslations();
+      setParallelTranslations(false);
+      showToast('Parallel translations disabled');
+    }
+  }, [parallelTranslations]);
 
   const toggleSelectionMode = useCallback(() => {
     setSelectionMode(prev => !prev);
@@ -176,27 +257,103 @@ const DownloadQueue = ({ navigation }: TaskQueueScreenProps) => {
               visible={visible}
               onDismiss={closeMenu}
               anchor={
-                tasks.length > 0 ? (
-                  <MaterialAppbar.Action
-                    icon="dots-vertical"
-                    iconColor={theme.onSurface}
-                    onPress={openMenu}
-                  />
-                ) : null
+                <MaterialAppbar.Action
+                  icon="dots-vertical"
+                  iconColor={theme.onSurface}
+                  onPress={openMenu}
+                />
               }
-              contentStyle={{ backgroundColor: overlay(2, theme.surface) }}
+              contentStyle={{
+                backgroundColor: overlay(2, theme.surface),
+                minWidth: 250,
+              }}
             >
+              <View style={styles.menuHeader}>
+                <Text style={{ color: theme.onSurface, fontWeight: 'bold' }}>
+                  Parallel Processing
+                </Text>
+              </View>
+
               <Menu.Item
-                onPress={() => {
-                  ServiceManager.manager.stop();
-                  setIsRunning(false);
-                  showToast('All tasks cancelled');
-                  closeMenu();
-                }}
-                title={'Cancel All Tasks'}
+                title="Downloads"
+                leadingIcon="download"
                 titleStyle={{ color: theme.onSurface }}
+                trailingIcon={() => (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <IconButton
+                      icon="information-outline"
+                      iconColor={theme.onSurfaceVariant}
+                      size={18}
+                      style={{ margin: 0 }}
+                      onPress={() => {
+                        closeMenu();
+                        Alert.alert(
+                          'Parallel Downloads',
+                          ParallelProcessingWarnings.downloads,
+                        );
+                      }}
+                    />
+                    <Switch
+                      value={parallelDownloads}
+                      onValueChange={() => {
+                        closeMenu();
+                        toggleParallelDownloads();
+                      }}
+                      color={theme.primary}
+                    />
+                  </View>
+                )}
               />
+
+              <Menu.Item
+                title="Translations"
+                leadingIcon="translate"
+                titleStyle={{ color: theme.onSurface }}
+                trailingIcon={() => (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <IconButton
+                      icon="information-outline"
+                      iconColor={theme.onSurfaceVariant}
+                      size={18}
+                      style={{ margin: 0 }}
+                      onPress={() => {
+                        closeMenu();
+                        Alert.alert(
+                          'Parallel Translations',
+                          ParallelProcessingWarnings.translations,
+                        );
+                      }}
+                    />
+                    <Switch
+                      value={parallelTranslations}
+                      onValueChange={() => {
+                        closeMenu();
+                        toggleParallelTranslations();
+                      }}
+                      color={theme.primary}
+                    />
+                  </View>
+                )}
+              />
+
+              {tasks.length > 0 && (
+                <>
+                  <View style={styles.divider} />
+                  <Menu.Item
+                    onPress={() => {
+                      ServiceManager.manager.stop();
+                      setIsRunning(false);
+                      showToast('All tasks cancelled');
+                      closeMenu();
+                    }}
+                    title={'Cancel All Tasks'}
+                    titleStyle={{ color: theme.onSurface }}
+                    leadingIcon="cancel"
+                  />
+                </>
+              )}
             </Menu>
+
             <MaterialAppbar.Action
               icon="checkbox-marked-circle-outline"
               iconColor={theme.onSurface}
@@ -275,5 +432,19 @@ const styles = StyleSheet.create({
     height: 4,
     marginTop: 8,
     backgroundColor: 'transparent',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  menuHeader: {
+    padding: 12,
+    paddingBottom: 4,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    marginVertical: 4,
   },
 });

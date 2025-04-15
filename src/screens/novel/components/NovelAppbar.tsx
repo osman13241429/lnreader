@@ -17,6 +17,7 @@ const NovelAppbar = ({
   isLocal,
   downloadChapters,
   deleteChapters,
+  deleteTranslations,
   showEditInfoModal,
   downloadCustomChapterModal,
   setCustomNovelCover,
@@ -32,6 +33,7 @@ const NovelAppbar = ({
   isLocal: boolean;
   downloadChapters: (amount: number | 'all' | 'unread') => void;
   deleteChapters: () => void;
+  deleteTranslations: (amount: 'selected' | 'all') => void;
   showEditInfoModal: React.Dispatch<React.SetStateAction<boolean>>;
   downloadCustomChapterModal: () => void;
   setCustomNovelCover: () => Promise<void>;
@@ -45,7 +47,7 @@ const NovelAppbar = ({
     const backgroundColor = interpolateColor(
       headerOpacity.value,
       [0, 1],
-      ['transparent', theme.surface2],
+      ['transparent', theme.surface2 || '#121212'],
     );
     return {
       backgroundColor,
@@ -53,7 +55,17 @@ const NovelAppbar = ({
   });
 
   const [downloadMenu, showDownloadMenu] = useState(false);
+  const [translationMenu, showTranslationMenu] = useState(false);
   const [extraMenu, showExtraMenu] = useState(false);
+
+  // Helper function to safely get strings
+  const getStringOrDefault = (key: string, fallback: string) => {
+    try {
+      return getString(key as any);
+    } catch (error) {
+      return fallback;
+    }
+  };
 
   return (
     <Animated.View style={[headerOpacityStyle]}>
@@ -158,6 +170,43 @@ const NovelAppbar = ({
             />
           </Menu>
         )}
+        <Menu
+          visible={translationMenu}
+          onDismiss={() => showTranslationMenu(false)}
+          anchor={
+            <Appbar.Action
+              icon="translate"
+              onPress={() => showTranslationMenu(true)}
+              theme={{ colors: theme }}
+              style={{ paddingTop: 2 }}
+              size={27}
+            />
+          }
+          contentStyle={{ backgroundColor: theme.surface2 }}
+        >
+          <Menu.Item
+            title={getString('common.all')}
+            style={{ backgroundColor: theme.surface2 }}
+            titleStyle={{
+              color: theme.onSurface,
+            }}
+            onPress={() => {
+              showTranslationMenu(false);
+              deleteTranslations('all');
+            }}
+          />
+          <Menu.Item
+            title={getStringOrDefault('translation.selected', 'Selected')}
+            style={{ backgroundColor: theme.surface2 }}
+            titleStyle={{
+              color: theme.onSurface,
+            }}
+            onPress={() => {
+              showTranslationMenu(false);
+              deleteTranslations('selected');
+            }}
+          />
+        </Menu>
         <Menu
           visible={extraMenu}
           onDismiss={() => showExtraMenu(false)}

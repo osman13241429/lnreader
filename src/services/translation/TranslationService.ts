@@ -295,6 +295,13 @@ export const translateText = async (
   }
 };
 
+export class DependencyMissingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DependencyMissingError';
+  }
+}
+
 /**
  * Executes the translation task for a single chapter in the background.
  */
@@ -345,8 +352,8 @@ export const translateChapterTask = async (
     const fileExists = await FileManager.exists(filePath);
 
     if (!fileExists) {
-      throw new Error(
-        `Chapter content not found. Download chapter '${chapterName}' first.`,
+      throw new DependencyMissingError(
+        `Chapter content not found for '${chapterName}'. Waiting for download.`,
       );
     }
 
