@@ -1,0 +1,157 @@
+name: Create Manual Release
+
+on:
+  workflow_dispatch: # Allows manual triggering from the Actions tab
+    inputs:
+      version:
+        description: 'Optional: Specify the exact version (e.g., v1.2.3). If omitted, it will try to determine automatically.'
+        required: false
+        type: string
+      base_branch:
+        description: 'Branch to base the release on'
+        required: true
+        default: 'main'
+        type: string
+
+permissions: read-all # Default permissions
+
+jobs:
+  prepare_release_data:
+    name: Prepare Release Data
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.determine_version.outputs.new_version }}
+      release_notes: ${{ steps.generate_notes.outputs.release_notes }}
+      commit_sha: ${{ steps.get_sha.outputs.commit_sha }}
+      previous_tag: ${{ steps.get_tags.outputs.previous_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.base_branch }}
+          fetch-depth: 0 # Required to get all history for changelog generation
+
+      - name: Get current commit SHA
+        id: get_sha
+        run: echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get latest Git tag
+        id: get_tags
+        run: |
+          # Fetch all tags from the remote
+          git fetch --tags --force
+          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1`) || echo "No tags found, setting previous_tag to initial commit"
+          if [ -z "$LATEST_TAG" ]; then
+             # If no tags, use the very first commit as the range start
+             PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          else
+             PREVIOUS_TAG=$LATEST_TAG
+          fi
+          echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+          echo "Found previous tag: ${PREVIOUS_TAG}"
+
+      # --- Determine Next Version ---
+      # Option 1: Use manual input if provided
+      # Option 2: Use a tool like semantic-release or standard-version (npm)
+      # Option 3: Implement custom logic (e.g., bump patch version)
+      # This is a placeholder - replace with your actual versioning logic
+      - name: Determine Next Version
+        id: determine_version
+        run: |
+          MANUAL_VERSION="${{ github.event.inputs.version }}"
+          PREVIOUS_TAG="${{ steps.get_tags.outputs.previous_tag }}"
+          NEXT_VERSION=""
+
+          if [[ -n "$MANUAL_VERSION" ]]; then
+            echo "Using manually specified version: $MANUAL_VERSION"
+            NEXT_VERSION="$MANUAL_VERSION"
+          elif [[ "$PREVIOUS_TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+             # Basic example: Bump patch version if previous tag looks like semver
+             VERSION_BASE=${BASH_REMATCH[1]}
+             MAJOR=$(echo $VERSION_BASE | cut -d. -f1)
+             MINOR=$(echo $VERSION_BASE | cut -d. -f2)
+             PATCH=$(echo $VERSION_BASE | cut -d. -f3)
+             NEXT_PATCH=$((PATCH + 1))
+             NEXT_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+             echo "Determined next version (patch bump): $NEXT_VERSION"
+          else
+             # Fallback if no previous tag or not semver-like
+             NEXT_VERSION="v0.1.0" # Or handle error
+             echo "WARN: Could not determine previous version or format unknown. Defaulting to $NEXT_VERSION"
+          fi
+
+          if [[ -z "$NEXT_VERSION" ]]; then
+            echo "Error: Could not determine next version."
+            exit 1
+          fi
+          echo "new_version=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+
+      # --- Generate Release Notes ---
+      # Option 1: Use a conventional changelog tool (recommended if using conventional commits)
+      # Option 2: Simple git log formatting
+      # This is a basic placeholder
+      - name: Generate Release Notes
+        id: generate_notes
+        run: |
+          echo "Generating release notes between ${{ steps.get_tags.outputs.previous_tag }} and ${{ steps.get_sha.outputs.commit_sha }}"
+          # Use GitHub's Markdown format for multi-line output
+          {
+            echo "## Changes in this release:"
+            echo ""
+            # Format: '* Commit message (Author)' - Exclude merge commits
+            git log ${{ steps.get_tags.outputs.previous_tag }}..${{ steps.get_sha.outputs.commit_sha }} --pretty=format:'* %s (%an)' --no-merges
+            echo ""
+          } >> RELEASE_NOTES.md
+          # Make the notes safe for JSON/output contexts
+          NOTES_CONTENT=$(cat RELEASE_NOTES.md)
+          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Generated Notes:"
+          cat RELEASE_NOTES.md
+
+
+  create_release:
+    name: Create Release Tag and GitHub Release
+    needs: prepare_release_data
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create releases and tags
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+           ref: ${{ needs.prepare_release_data.outputs.commit_sha }} # Checkout the exact commit we based the release on
+
+      - name: Create Git Tag
+        run: |
+          echo "Tagging commit ${{ needs.prepare_release_data.outputs.commit_sha }} with tag ${{ needs.prepare_release_data.outputs.new_version }}"
+          git tag ${{ needs.prepare_release_data.outputs.new_version }} ${{ needs.prepare_release_data.outputs.commit_sha }}
+          git push origin ${{ needs.prepare_release_data.outputs.new_version }}
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.prepare_release_data.outputs.new_version }}
+          release_name: Release ${{ needs.prepare_release_data.outputs.new_version }}
+          commitish: ${{ needs.prepare_release_data.outputs.commit_sha }}
+          body: ${{ needs.prepare_release_data.outputs.release_notes }}
+          draft: false # Set to true if you want to manually review/publish later
+          prerelease: false # Set to true if this is a pre-release
+
+  # Optional: Add a notification job
+  notify:
+    name: Notify Release
+    needs: create_release
+    runs-on: ubuntu-latest
+    if: always() # Run even if previous jobs fail, to potentially notify about failure/success
+    steps:
+       - name: Send Slack Notification (Example)
+         # Replace with your preferred notification action/script
+         run: |
+            echo "Sending notification for release ${{ needs.prepare_release_data.outputs.new_version }}"
+            # Example: curl -X POST -H 'Content-type: application/json' --data '{"text":"New release created: ${{ needs.prepare_release_data.outputs.new_version }}\nNotes:\n${{ needs.prepare_release_data.outputs.release_notes }}"}' YOUR_SLACK_WEBHOOK_URL
+            echo "(Notification step placeholder)"
