@@ -44,12 +44,9 @@ export const createTables = () => {
  * Database migration to handle schema changes
  */
 export const migrateDatabase = () => {
-  // We'll only log the "Running database migrations" message when actual migrations happen
   let didRunMigration = false;
 
-  // Add hasTranslation column to Chapter table if it doesn't exist
   db.transaction(tx => {
-    // First check if the column exists
     tx.executeSql(
       'PRAGMA table_info(Chapter)',
       [],
@@ -58,47 +55,101 @@ export const migrateDatabase = () => {
         const hasTranslationExists = columns.some(
           col => col.name === 'hasTranslation',
         );
+        const translatedNameExistsChapter = columns.some(
+          col => col.name === 'translatedName',
+        ); // Check for Chapter.translatedName
+
+        if (!hasTranslationExists || !translatedNameExistsChapter) {
+          // Only log once if any migration happens in this block
+          if (!didRunMigration) {
+            console.log('Running database migrations...');
+            didRunMigration = true;
+          }
+        }
 
         if (!hasTranslationExists) {
-          // Only log when actual migration happens
-          console.log('Running database migrations...');
-          didRunMigration = true;
-
-          console.log('Adding hasTranslation column to Chapter table');
           tx.executeSql(
             'ALTER TABLE Chapter ADD COLUMN hasTranslation INTEGER DEFAULT 0',
             [],
             () => {
-              console.log('Successfully added hasTranslation column');
-
-              // Update existing translations if any
+              // Update existing chapter content translations if any
               tx.executeSql(
                 `UPDATE Chapter SET hasTranslation = 1 
                  WHERE id IN (SELECT chapterId FROM Translation)`,
                 [],
-                () => console.log('Updated existing translations'),
                 (_, error) => {
-                  console.error('Error updating translations:', error);
-                  return false;
+                  return error ? false : true;
                 },
               );
             },
             (_, error) => {
-              console.error('Error adding hasTranslation column:', error);
-              return false;
+              return error ? false : true;
+            },
+          );
+        }
+
+        // Migration: Add translatedName to Chapter table
+        if (!translatedNameExistsChapter) {
+          tx.executeSql(
+            'ALTER TABLE Chapter ADD COLUMN translatedName TEXT',
+            [],
+            (_, error) => {
+              return error ? false : true;
             },
           );
         }
       },
       (_, error) => {
-        console.error('Error checking for hasTranslation column:', error);
-        return false;
+        return error ? false : true;
+      },
+    );
+
+    // Migration: Add translatedName and translatedSummary to Novel table
+    tx.executeSql(
+      'PRAGMA table_info(Novel)',
+      [],
+      (_, { rows }) => {
+        const columns = rows._array;
+        const translatedNameExists = columns.some(
+          col => col.name === 'translatedName',
+        );
+        const translatedSummaryExists = columns.some(
+          col => col.name === 'translatedSummary',
+        );
+
+        if (!translatedNameExists || !translatedSummaryExists) {
+          // Only log once if any migration happens in this block
+          if (!didRunMigration) {
+            console.log('Running database migrations...');
+            didRunMigration = true;
+          }
+        }
+
+        if (!translatedNameExists) {
+          tx.executeSql(
+            'ALTER TABLE Novel ADD COLUMN translatedName TEXT',
+            [],
+            (_, error) => {
+              return error ? false : true;
+            },
+          );
+        }
+
+        if (!translatedSummaryExists) {
+          tx.executeSql(
+            'ALTER TABLE Novel ADD COLUMN translatedSummary TEXT',
+            [],
+            (_, error) => {
+              return error ? false : true;
+            },
+          );
+        }
+      },
+      (_, error) => {
+        return error ? false : true;
       },
     );
   });
-
-  // Add more migrations here in the future
-  // Each should set didRunMigration to true if they actually do something
 
   return didRunMigration;
 };

@@ -55,14 +55,23 @@ export const getLibraryNovelsFromDb = (
 };
 
 const getLibraryWithCategoryQuery = `
-  SELECT *
-  FROM
+  SELECT 
+    NIL.*,
+    chaptersUnread,
+    chaptersDownloaded,
+    lastReadAt,
+    lastUpdatedAt
+  FROM 
   (
-    SELECT NIL.*, chaptersUnread, chaptersDownloaded, lastReadAt, lastUpdatedAt
-    FROM 
-    (
-      SELECT 
-        Novel.*,
+    SELECT 
+        Novel.id, Novel.path, Novel.pluginId, Novel.name, Novel.cover, Novel.summary, 
+        Novel.author, Novel.artist, Novel.status, Novel.genres, Novel.inLibrary, 
+        Novel.isLocal, Novel.totalPages, Novel.translatedName, Novel.translatedSummary, 
+        CASE 
+          WHEN Novel.translatedName IS NOT NULL AND Novel.translatedName <> '' 
+          THEN Novel.translatedName 
+          ELSE Novel.name 
+        END AS displayName, 
         category,
         categoryId
       FROM
@@ -70,7 +79,7 @@ const getLibraryWithCategoryQuery = `
         SELECT NovelId, name as category, categoryId FROM (NovelCategory JOIN Category ON NovelCategory.categoryId = Category.id)
       ) as NC ON Novel.id = NC.novelId
       WHERE inLibrary = 1
-    ) as NIL 
+    ) as NIL
     LEFT JOIN 
     (
       SELECT 
@@ -79,7 +88,7 @@ const getLibraryWithCategoryQuery = `
       FROM Chapter
       GROUP BY novelId
     ) as C ON NIL.id = C.novelId
-  ) WHERE 1 = 1 
+   WHERE 1 = 1 
 `;
 
 export const getLibraryWithCategory = ({

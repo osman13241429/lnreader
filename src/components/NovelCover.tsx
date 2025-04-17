@@ -162,11 +162,11 @@ function NovelCover<TNovel extends CoverItemLibrary | CoverItemPlugin>({
         />
         <View style={styles.compactTitleContainer}>
           {displayMode === DisplayModes.Compact ? (
-            <CompactTitle novelName={item.name} />
+            <CompactTitle novelName={item.displayName} />
           ) : null}
         </View>
         {displayMode === DisplayModes.Comfortable ? (
-          <ComfortableTitle novelName={item.name} theme={theme} />
+          <ComfortableTitle novelName={item.displayName} theme={theme} />
         ) : null}
       </Pressable>
     </View>
@@ -174,7 +174,7 @@ function NovelCover<TNovel extends CoverItemLibrary | CoverItemPlugin>({
     <ListView
       item={item}
       downloadBadge={
-        showDownloadBadges && item.id && item.chaptersDownloaded ? (
+        showDownloadBadges && item.id && item.chaptersDownloaded > 0 ? (
           <DownloadBadge
             theme={theme}
             showUnreadBadges={showUnreadBadges}
@@ -184,7 +184,7 @@ function NovelCover<TNovel extends CoverItemLibrary | CoverItemPlugin>({
         ) : null
       }
       unreadBadge={
-        showUnreadBadges && item.id && item.chaptersUnread ? (
+        showUnreadBadges && item.id && item.chaptersUnread > 0 ? (
           <UnreadBadge
             theme={theme}
             chaptersDownloaded={item.chaptersDownloaded}

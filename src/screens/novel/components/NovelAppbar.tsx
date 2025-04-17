@@ -26,6 +26,11 @@ const NovelAppbar = ({
   shareNovel,
   showJumpToChapterModal,
   headerOpacity,
+  translateChapters,
+  translateNovelMetadata,
+  hasAnyTranslation,
+  showTranslatedText,
+  toggleShowTranslatedText,
 }: {
   novel: NovelInfo;
   chapters: ChapterInfo[];
@@ -42,6 +47,11 @@ const NovelAppbar = ({
   shareNovel: () => void;
   showJumpToChapterModal: (arg: boolean) => void;
   headerOpacity: SharedValue<number>;
+  translateChapters: (amount: number | 'all') => void;
+  translateNovelMetadata: () => void;
+  hasAnyTranslation: boolean;
+  showTranslatedText: boolean;
+  toggleShowTranslatedText: () => void;
 }) => {
   const headerOpacityStyle = useAnimatedStyle(() => {
     const backgroundColor = interpolateColor(
@@ -72,6 +82,13 @@ const NovelAppbar = ({
       <Appbar.Header theme={{ colors: { ...theme, surface: 'transparent' } }}>
         <Appbar.BackAction onPress={goBack} />
         <Appbar.Content title="" />
+        {hasAnyTranslation && (
+          <Appbar.Action
+            icon="google-translate"
+            color={showTranslatedText ? theme.primary : theme.onSurface}
+            onPress={toggleShowTranslatedText}
+          />
+        )}
         <EpubIconButton theme={theme} novel={novel} chapters={chapters} />
         <Appbar.Action icon="share-variant" onPress={shareNovel} />
         <Appbar.Action
@@ -185,7 +202,49 @@ const NovelAppbar = ({
           contentStyle={{ backgroundColor: theme.surface2 }}
         >
           <Menu.Item
-            title={getString('common.all')}
+            title={getStringOrDefault(
+              'translation.translateNext5',
+              'Translate Next 5',
+            )}
+            style={{ backgroundColor: theme.surface2 }}
+            titleStyle={{
+              color: theme.onSurface,
+            }}
+            onPress={() => {
+              showTranslationMenu(false);
+              translateChapters(5);
+            }}
+          />
+          <Menu.Item
+            title={getStringOrDefault(
+              'translation.translateAll',
+              'Translate All',
+            )}
+            style={{ backgroundColor: theme.surface2 }}
+            titleStyle={{
+              color: theme.onSurface,
+            }}
+            onPress={() => {
+              showTranslationMenu(false);
+              translateChapters('all');
+            }}
+          />
+          <Menu.Item
+            title={getStringOrDefault(
+              'translation.translateNovelMeta',
+              'Translate Novel Info',
+            )}
+            style={{ backgroundColor: theme.surface2 }}
+            titleStyle={{
+              color: theme.onSurface,
+            }}
+            onPress={() => {
+              showTranslationMenu(false);
+              translateNovelMetadata();
+            }}
+          />
+          <Menu.Item
+            title={getStringOrDefault('translation.deleteAll', 'Delete All')}
             style={{ backgroundColor: theme.surface2 }}
             titleStyle={{
               color: theme.onSurface,
@@ -196,7 +255,10 @@ const NovelAppbar = ({
             }}
           />
           <Menu.Item
-            title={getStringOrDefault('translation.selected', 'Selected')}
+            title={getStringOrDefault(
+              'translation.deleteSelected',
+              'Delete Selected',
+            )}
             style={{ backgroundColor: theme.surface2 }}
             titleStyle={{
               color: theme.onSurface,
@@ -245,7 +307,10 @@ const NovelAppbar = ({
           />
           {!isLocal && (
             <Menu.Item
-              title={getString('novelScreen.refreshCover')}
+              title={getStringOrDefault(
+                'novelScreen.refreshCover',
+                'Refresh Cover',
+              )}
               style={{ backgroundColor: theme.surface2 }}
               titleStyle={{
                 color: theme.onSurface,

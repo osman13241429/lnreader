@@ -953,8 +953,15 @@ export const createNovelEpub = async (
     // Add each chapter
     for (let i = 0; i < sortedChapters.length; i++) {
       const chapter = sortedChapters[i];
+      // Prioritize translated name if available and requested
+      const baseChapterTitle =
+        options?.useTranslatedContent && chapter.translatedName?.trim()
+          ? chapter.translatedName.trim()
+          : chapter.name?.trim();
+
       const chapterTitle =
-        chapter.name?.trim() || `Chapter ${chapter.chapterNumber || i + 1}`;
+        baseChapterTitle || `Chapter ${chapter.chapterNumber || i + 1}`;
+
       let finalChapterTitle = chapterTitle;
 
       // Optionally use only chapter number

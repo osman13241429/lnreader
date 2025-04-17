@@ -48,6 +48,7 @@ export interface NovelSettings {
   sort?: string;
   filter?: string;
   showChapterTitles?: boolean;
+  showTranslatedText?: boolean;
 }
 
 const defaultNovelSettings: NovelSettings = {
@@ -178,6 +179,15 @@ export const useNovel = (novelPath: string, pluginId: string) => {
 
   const setShowChapterTitles = (v: boolean) => {
     setNovelSettings({ ...novelSettings, showChapterTitles: v });
+  };
+
+  const setShowTranslatedTextPreference = (showTranslated: boolean) => {
+    if (novel) {
+      setNovelSettings({
+        ...novelSettings,
+        showTranslatedText: showTranslated,
+      });
+    }
   };
 
   const followNovel = () => {
@@ -411,6 +421,7 @@ export const useNovel = (novelPath: string, pluginId: string) => {
     markPreviousChaptersUnread,
     markChaptersUnread,
     setShowChapterTitles,
+    setShowTranslatedTextPreference,
     markChapterRead,
     refreshChapters,
     deleteChapter,

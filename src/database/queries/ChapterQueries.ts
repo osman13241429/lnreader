@@ -487,3 +487,50 @@ export const clearUpdates = () => {
     );
   });
 };
+
+// Helper function to get chapter details including translatedName
+export const getChapterInfo = async (
+  chapterId: number,
+): Promise<ChapterInfo | null> => {
+  return new Promise((resolve, reject) => {
+    db.transaction(tx => {
+      tx.executeSql(
+        'SELECT * FROM Chapter WHERE id = ?',
+        [chapterId],
+        (_, { rows }) => {
+          if (rows.length > 0) {
+            resolve(rows.item(0));
+          } else {
+            resolve(null);
+          }
+        },
+        (_, error) => {
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};
+
+// Helper function to update chapter translation state (hasTranslation and translatedName)
+export const updateChapterTranslationState = async (
+  chapterId: number,
+  translatedName: string | null | undefined,
+): Promise<void> => {
+  return new Promise<void>((resolve, reject) => {
+    db.transaction(tx => {
+      tx.executeSql(
+        'UPDATE Chapter SET hasTranslation = 1, translatedName = ? WHERE id = ?',
+        [translatedName, chapterId],
+        () => {
+          resolve();
+        },
+        (_, error) => {
+          reject(error);
+          return false;
+        },
+      );
+    });
+  });
+};

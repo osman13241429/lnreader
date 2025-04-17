@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import {
   StyleSheet,
   View,
@@ -38,7 +44,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBoolean } from '@hooks';
 import NovelScreenLoading from './components/LoadingAnimation/NovelScreenLoading';
 import { StackScreenProps } from '@react-navigation/stack';
-import { ChapterInfo } from '@database/types';
+import { ChapterInfo, NovelInfo } from '@database/types';
 import ChapterItem from './components/ChapterItem';
 import { getString } from '@strings/translations';
 import NovelDrawer from './components/NovelDrawer';
@@ -59,11 +65,13 @@ import { refreshNovelCover } from '@database/queries/NovelQueries';
 import { RootStackParamList } from '@navigators/types';
 import * as MediaLibrary from 'expo-media-library';
 import * as FileSystem from 'expo-file-system';
+import { StringMap } from '@strings/types';
 
 // Define the type here since the import is missing
 type NovelScreenProps = StackScreenProps<RootStackParamList, 'Novel'>;
 
 const Novel = ({ route, navigation }: NovelScreenProps) => {
+  // ========================= HOOKS ==========================
   const { name, path, pluginId } = route.params;
   const [updating, setUpdating] = useState(false);
   const {
@@ -80,6 +88,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
     novel,
     chapters,
     lastRead,
+    novelSettings,
     novelSettings: {
       sort = defaultChapterSort,
       filter = '',
@@ -90,6 +99,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
     getNovel,
     sortAndFilterChapters,
     setShowChapterTitles,
+    setShowTranslatedTextPreference,
     bookmarkChapters,
     markChaptersRead,
     markChaptersUnread,
@@ -98,12 +108,16 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
     followNovel,
     deleteChapter,
     refreshChapters,
-    deleteChapters,
+    deleteChapters: deleteNovelChapters,
   } = useNovel(path, pluginId);
   const theme = useTheme();
   const { top: topInset, bottom: bottomInset } = useSafeAreaInsets();
 
-  const { downloadQueue, downloadChapter, downloadChapters } = useDownload();
+  const {
+    downloadQueue,
+    downloadChapter,
+    downloadChapters: queueDownloadChapters,
+  } = useDownload();
 
   const [selected, setSelected] = useState<ChapterInfo[]>([]);
   const [editInfoModal, showEditInfoModal] = useState(false);
@@ -124,22 +138,28 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
 
   const { apiKey, model, defaultInstruction } = useTranslationSettings();
 
-  const onPageScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = event.nativeEvent.contentOffset.y;
-    headerOpacity.value = y < 50 ? 0 : (y - 50) / 150;
-    const currentScrollPosition = Math.floor(y) ?? 0;
-    if (useFabForContinueReading && lastRead) {
-      setIsFabExtended(currentScrollPosition <= 0);
-    }
-  };
+  const [jumpToChapterModal, showJumpToChapterModal] = useState(false);
+  const downloadCustomChapterModal = useBoolean();
 
-  useEffect(() => {
-    refreshChapters();
-  }, [downloadQueue]);
+  const showTranslatedText = novelSettings.showTranslatedText ?? false;
 
-  useFocusEffect(refreshChapters);
+  // =================== MEMOS & CALLBACKS ====================
 
-  const onRefresh = () => {
+  const downloadChapters = useCallback(
+    (novelInfo: NovelInfo, chs: ChapterInfo[]) => {
+      queueDownloadChapters(novelInfo, chs);
+    },
+    [queueDownloadChapters],
+  );
+
+  const deleteChapters = useCallback(
+    (chs: ChapterInfo[]) => {
+      deleteNovelChapters(chs);
+    },
+    [deleteNovelChapters],
+  );
+
+  const onRefresh = useCallback(() => {
     if (novel) {
       setUpdating(true);
       updateNovel(pluginId, novel.path, novel.id, {
@@ -149,109 +169,108 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         .then(() => getNovel())
         .then(() =>
           showToast(
-            getString('novelScreen.updatedToast', { name: novel.name }),
+            getString('novelScreen.updatedToast' as keyof StringMap, {
+              name: novel.name,
+            }),
           ),
         )
         .catch(error => showToast(error.message))
         .finally(() => setUpdating(false));
     }
-  };
+  }, [
+    novel,
+    pluginId,
+    downloadNewChapters,
+    refreshNovelMetadata,
+    getNovel,
+    setUpdating,
+  ]);
 
-  const onRefreshPage = (page: string) => {
-    if (novel) {
-      setUpdating(true);
-      updateNovelPage(pluginId, novel.path, novel.id, page, {
-        downloadNewChapters,
-      })
-        .then(() => getNovel())
-        .then(() => showToast(`Updated page: ${page}`))
-        .catch(e => showToast(e.message))
-        .finally(() => setUpdating(false));
-    }
-  };
-
-  const refreshControl = () => (
-    <RefreshControl
-      progressViewOffset={topInset + 32}
-      onRefresh={onRefresh}
-      refreshing={updating}
-      colors={[theme.primary]}
-      progressBackgroundColor={theme.onPrimary}
-    />
+  const onRefreshPage = useCallback(
+    (page: string) => {
+      if (novel) {
+        setUpdating(true);
+        updateNovelPage(pluginId, novel.path, novel.id, page, {
+          downloadNewChapters,
+        })
+          .then(() => getNovel())
+          .then(() => showToast(`Updated page: ${page}`))
+          .catch(e => showToast(e.message))
+          .finally(() => setUpdating(false));
+      }
+    },
+    [novel, pluginId, downloadNewChapters, getNovel, setUpdating],
   );
 
-  const downloadChs = (amount: number | 'all' | 'unread') => {
-    if (!novel) {
+  const downloadChs = useCallback(
+    (amount: number | 'all' | 'unread') => {
+      if (!novel || !chapters) {
+        return;
+      }
+      let filtered = chapters.filter(chapter => !chapter.isDownloaded);
+      if (amount === 'unread') {
+        filtered = filtered.filter(chapter => chapter.unread);
+      }
+      if (isNumber(amount)) {
+        filtered = filtered.slice(0, amount);
+      }
+      if (filtered.length) {
+        downloadChapters(novel, filtered);
+      }
+    },
+    [novel, chapters, downloadChapters],
+  );
+
+  const deleteAllDownloadedChapters = useCallback(() => {
+    if (!chapters) {
       return;
     }
-    let filtered = chapters.filter(chapter => !chapter.isDownloaded);
-    if (amount === 'unread') {
-      filtered = filtered.filter(chapter => chapter.unread);
-    }
-    if (isNumber(amount)) {
-      filtered = filtered.slice(0, amount);
-    }
-    if (filtered) {
-      downloadChapters(novel, filtered);
-    }
-  };
-
-  const deleteChs = () => {
     deleteChapters(chapters.filter(c => c.isDownloaded));
-  };
+  }, [chapters, deleteChapters]);
 
-  const deleteTranslations = async (amount: 'selected' | 'all') => {
-    if (!novel) {
-      return;
-    }
-
-    try {
-      let chaptersToProcess: ChapterInfo[] = [];
-
-      if (amount === 'all') {
-        chaptersToProcess = chapters.filter(chapter => chapter.hasTranslation);
-      } else if (amount === 'selected' && selected.length > 0) {
-        chaptersToProcess = selected.filter(chapter => chapter.hasTranslation);
-      } else {
-        showToast(getString('translation.noChaptersSelected'));
+  const deleteTranslations = useCallback(
+    async (amount: 'selected' | 'all') => {
+      if (!novel || !chapters) {
         return;
       }
 
-      if (chaptersToProcess.length === 0) {
-        showToast(getString('translation.noTranslationsFound'));
-        return;
-      }
+      try {
+        let chaptersToProcess: ChapterInfo[] = [];
 
-      let successCount = 0;
-      const chapterIds = chaptersToProcess.map(chapter => chapter.id);
-      const chapterIdsStr = chapterIds.join(',');
-
-      // Delete from Translation table
-      await new Promise<void>((resolve, reject) => {
-        require('@database/db').db.transaction((tx: any) => {
-          tx.executeSql(
-            `DELETE FROM Translation WHERE chapterId IN (${chapterIdsStr})`,
-            [],
-            (_, resultSet: any) => {
-              successCount = resultSet.rowsAffected || 0;
-              resolve();
-            },
-            (_: any, error: any) => {
-              reject(error);
-              return false;
-            },
+        if (amount === 'all') {
+          chaptersToProcess = chapters.filter(
+            chapter => chapter.hasTranslation,
           );
-        });
-      });
+        } else if (amount === 'selected' && selected.length > 0) {
+          chaptersToProcess = selected.filter(
+            chapter => chapter.hasTranslation,
+          );
+        } else {
+          showToast(
+            getString('translation.noChaptersSelected' as keyof StringMap),
+          );
+          return;
+        }
 
-      // Update Chapter table if deletions were successful
-      if (successCount > 0) {
+        if (chaptersToProcess.length === 0) {
+          showToast(
+            getString('translation.noTranslationsFound' as keyof StringMap),
+          );
+          return;
+        }
+
+        let successCount = 0;
+        const chapterIds = chaptersToProcess.map(chapter => chapter.id);
+        const chapterIdsStr = chapterIds.join(',');
+
+        // Delete from Translation table
         await new Promise<void>((resolve, reject) => {
           require('@database/db').db.transaction((tx: any) => {
             tx.executeSql(
-              `UPDATE Chapter SET hasTranslation = 0 WHERE id IN (${chapterIdsStr})`,
+              `DELETE FROM Translation WHERE chapterId IN (${chapterIdsStr})`,
               [],
-              () => {
+              (_tx: any, resultSet: any) => {
+                successCount = resultSet.rowsAffected || 0;
                 resolve();
               },
               (_: any, error: any) => {
@@ -262,55 +281,181 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
           });
         });
 
-        // Show appropriate toast message based on count
-        if (successCount === 1) {
-          showToast(getString('translation.translationDeleted'));
+        // Update Chapter table if deletions were successful
+        if (successCount > 0) {
+          await new Promise<void>((resolve, reject) => {
+            require('@database/db').db.transaction((tx: any) => {
+              tx.executeSql(
+                `UPDATE Chapter SET hasTranslation = 0 WHERE id IN (${chapterIdsStr})`,
+                [],
+                () => {
+                  resolve();
+                },
+                (_: any, error: any) => {
+                  reject(error);
+                  return false;
+                },
+              );
+            });
+          });
+
+          // Show appropriate toast message based on count
+          if (successCount === 1) {
+            showToast(
+              getString('translation.translationDeleted' as keyof StringMap),
+            );
+          } else {
+            showToast(
+              getString('translation.translationsDeleted' as keyof StringMap, {
+                count: successCount,
+              }),
+            );
+          }
+
+          // Clear selection and refresh chapter list
+          setSelected([]);
+          refreshChapters();
         } else {
-          showToast(
-            getString('translation.translationsDeleted', {
-              count: successCount,
-            }),
-          );
+          showToast('No translations were deleted from the database');
+        }
+      } catch (error) {
+        showToast(getString('common.error' as keyof StringMap));
+      }
+    },
+    [novel, chapters, selected, refreshChapters, setSelected],
+  );
+
+  const translateChapters = useCallback(
+    async (amount: number | 'all') => {
+      if (!novel || !chapters) {
+        return;
+      }
+      if (!apiKey) {
+        showToast(getString('translation.noApiKey' as keyof StringMap));
+        return;
+      }
+
+      const untranslatedChapters = chapters.filter(
+        chapter => !chapter.hasTranslation,
+      );
+
+      if (untranslatedChapters.length === 0) {
+        showToast(
+          getString('translation.noUntranslatedChapters' as keyof StringMap),
+        );
+        return;
+      }
+
+      const chaptersToQueue = isNumber(amount)
+        ? untranslatedChapters.slice(0, amount)
+        : untranslatedChapters;
+
+      if (chaptersToQueue.length === 0) {
+        showToast('No chapters found to queue for translation.');
+        return;
+      }
+
+      showToast(
+        `Adding ${chaptersToQueue.length} translation task(s) to the queue...`,
+      );
+
+      const tasksToAdd: BackgroundTask[] = [];
+
+      for (const chapter of chaptersToQueue) {
+        const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
+        const fileExists = await FileManager.exists(filePath);
+
+        const translationTaskData = {
+          chapterId: chapter.id,
+          novelId: novel.id,
+          pluginId: novel.pluginId,
+          novelName: novel.name || 'Unknown Novel',
+          chapterName: chapter.name || `Chapter ${chapter.id}`,
+          apiKey: apiKey,
+          model: model,
+          instruction: defaultInstruction,
+        };
+
+        if (!fileExists) {
+          tasksToAdd.push({
+            name: 'DOWNLOAD_CHAPTER',
+            data: {
+              chapterId: chapter.id,
+              novelId: novel.id,
+              pluginId: novel.pluginId,
+              novelName: novel.name || 'Unknown Novel',
+              chapterName: chapter.name || `Chapter ${chapter.id}`,
+            },
+          });
         }
 
-        // Clear selection and refresh chapter list
-        setSelected([]);
-        refreshChapters();
-      } else {
-        showToast('No translations were deleted from the database');
+        tasksToAdd.push({
+          name: 'TRANSLATE_CHAPTER',
+          data: translationTaskData,
+        });
       }
-    } catch (error) {
-      showToast(getString('common.error'));
-    }
-  };
 
-  const shareNovel = () => {
+      if (tasksToAdd.length > 0) {
+        console.log(
+          '[Queueing Tasks] Tasks to add:',
+          JSON.stringify(tasksToAdd.map(t => t.name)),
+        );
+        ServiceManager.manager.addTask(tasksToAdd);
+      }
+    },
+    [novel, chapters, apiKey, model, defaultInstruction],
+  );
+
+  const translateNovelMetadata = useCallback(() => {
     if (!novel) {
       return;
     }
-    Share.share({
-      message: resolveUrl(novel.pluginId, novel.path, true),
-    });
-  };
+    if (!apiKey) {
+      showToast(getString('translation.noApiKey' as keyof StringMap));
+      return;
+    }
 
-  const [jumpToChapterModal, showJumpToChapterModal] = useState(false);
-  const downloadCustomChapterModal = useBoolean();
+    showToast(`Adding metadata translation task for ${novel.name} to queue...`);
+    ServiceManager.manager.addTask({
+      name: 'TRANSLATE_NOVEL_META',
+      data: {
+        novelId: novel.id,
+        novelName: novel.name,
+        apiKey: apiKey,
+        model: model,
+        instruction: defaultInstruction,
+      },
+    });
+  }, [novel, apiKey, model, defaultInstruction]);
+
+  const hasAnyTranslation = useMemo(() => {
+    return !!(
+      novel?.translatedName ||
+      novel?.translatedSummary ||
+      chapters?.some(c => c.translatedName)
+    );
+  }, [novel, chapters]);
+
+  const downloadSelectedChapters = useCallback(() => {
+    if (!novel) {
+      return;
+    }
+    downloadChapters(
+      novel,
+      selected.filter(chapter => !chapter.isDownloaded),
+    );
+    setSelected([]);
+  }, [novel, selected, downloadChapters, setSelected]);
 
   const actions = useMemo(() => {
+    if (!novel || !chapters) {
+      return [];
+    }
     const list = [];
-
     if (!novel?.isLocal && selected.some(obj => !obj.isDownloaded)) {
       list.push({
         icon: 'download-outline',
-        onPress: () => {
-          if (novel) {
-            downloadChapters(
-              novel,
-              selected.filter(chapter => !chapter.isDownloaded),
-            );
-          }
-          setSelected([]);
-        },
+        onPress: downloadSelectedChapters,
       });
     }
     if (!novel?.isLocal && selected.some(obj => obj.isDownloaded)) {
@@ -322,7 +467,6 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         },
       });
     }
-
     list.push({
       icon: 'bookmark-outline',
       onPress: () => {
@@ -330,7 +474,6 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         setSelected([]);
       },
     });
-
     if (selected.some(obj => obj.unread)) {
       list.push({
         icon: 'check',
@@ -340,10 +483,8 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         },
       });
     }
-
     if (selected.some(obj => !obj.unread)) {
       const chapterIds = selected.map(chapter => chapter.id);
-
       list.push({
         icon: 'check-outline',
         onPress: () => {
@@ -354,7 +495,6 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         },
       });
     }
-
     if (selected.length === 1) {
       if (selected[0].unread) {
         list.push({
@@ -374,72 +514,22 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         });
       }
     }
-
-    // Show translate button if API key exists and any selected chapter lacks translation
     if (apiKey && selected.some(obj => !obj.hasTranslation)) {
       list.push({
         icon: 'translate',
         onPress: async () => {
-          // Filter for chapters needing translation (regardless of download status)
           const chaptersToTranslate = selected.filter(
             chapter => !chapter.hasTranslation,
           );
           if (chaptersToTranslate.length > 0 && novel && apiKey) {
-            showToast(
-              `Adding ${chaptersToTranslate.length} translation tasks to queue...`,
-            );
-
-            const tasksToAdd: BackgroundTask[] = [];
-
-            for (const chapter of chaptersToTranslate) {
-              const filePath = `${NOVEL_STORAGE}/${novel.pluginId}/${novel.id}/${chapter.id}/index.html`;
-              const fileExists = await FileManager.exists(filePath);
-
-              const translationTaskData = {
-                chapterId: chapter.id,
-                novelId: novel.id,
-                pluginId: novel.pluginId,
-                novelName: novel.name || 'Unknown Novel',
-                chapterName: chapter.name || `Chapter ${chapter.id}`,
-                apiKey: apiKey,
-                model: model,
-                instruction: defaultInstruction,
-              };
-
-              if (!fileExists) {
-                tasksToAdd.push({
-                  name: 'DOWNLOAD_CHAPTER',
-                  data: {
-                    chapterId: chapter.id,
-                    novelId: novel.id,
-                    pluginId: novel.pluginId,
-                    novelName: novel.name || 'Unknown Novel',
-                    chapterName: chapter.name || `Chapter ${chapter.id}`,
-                  },
-                });
-                tasksToAdd.push({
-                  name: 'TRANSLATE_CHAPTER',
-                  data: translationTaskData,
-                });
-              } else {
-                tasksToAdd.push({
-                  name: 'TRANSLATE_CHAPTER',
-                  data: translationTaskData,
-                });
-              }
-            }
-
-            if (tasksToAdd.length > 0) {
-              ServiceManager.manager.addTask(tasksToAdd);
-            }
+            translateChapters(chaptersToTranslate.length);
           } else if (!apiKey) {
-            showToast(getString('translation.noApiKey'));
+            showToast(getString('translation.noApiKey' as keyof StringMap));
           }
           setSelected([]);
         },
       });
     }
-
     if (selected.some(obj => obj.hasTranslation)) {
       list.push({
         icon: 'translate-off',
@@ -448,78 +538,118 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         },
       });
     }
-
     return list;
-  }, [selected, apiKey, model, defaultInstruction]);
+  }, [
+    selected,
+    apiKey,
+    model,
+    defaultInstruction,
+    novel,
+    chapters,
+    downloadChapters,
+    deleteChapters,
+    bookmarkChapters,
+    markChaptersRead,
+    markChaptersUnread,
+    updateChapterProgressByIds,
+    markPreviouschaptersRead,
+    markPreviousChaptersUnread,
+    translateChapters,
+    deleteTranslations,
+    refreshChapters,
+    setSelected,
+    downloadSelectedChapters,
+  ]);
 
-  const isSelected = (id: number) => {
-    return selected.some(obj => obj.id === id);
-  };
+  const toggleShowTranslatedText = useCallback(
+    () => setShowTranslatedTextPreference(!showTranslatedText),
+    [showTranslatedText, setShowTranslatedTextPreference],
+  );
 
-  const onSelectPress = (chapter: ChapterInfo) => {
-    if (selected.length === 0) {
-      navigateToChapter(chapter);
-    } else {
-      if (isSelected(chapter.id)) {
-        setSelected(sel => sel.filter(it => it.id !== chapter.id));
-      } else {
-        setSelected(sel => [...sel, chapter]);
-      }
+  const shareNovel = useCallback(() => {
+    if (!novel) {
+      return;
     }
-  };
+    Share.share({
+      message: resolveUrl(novel.pluginId, novel.path, true),
+    });
+  }, [novel]);
 
-  const onSelectLongPress = (chapter: ChapterInfo) => {
-    if (selected.length === 0) {
-      if (!disableHapticFeedback) {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const isSelected = useCallback(
+    (id: number) => {
+      return selected.some(obj => obj.id === id);
+    },
+    [selected],
+  );
+
+  const navigateToChapter = useCallback(
+    (chapter: ChapterInfo) => {
+      if (novel) {
+        navigation.navigate('Chapter', { novel, chapter });
       }
-      setSelected(sel => [...sel, chapter]);
-    } else {
-      if (selected.length === chapters.length) {
-        return;
-      }
+    },
+    [navigation, novel],
+  );
 
-      /**
-       * Select custom range
-       */
-      const lastSelectedChapter = selected[selected.length - 1];
-
-      if (lastSelectedChapter.id !== chapter.id) {
-        if (lastSelectedChapter.id > chapter.id) {
-          setSelected(sel => [
-            ...sel,
-            chapter,
-            ...chapters.filter(
-              (chap: ChapterInfo) =>
-                (chap.id <= chapter.id || chap.id >= lastSelectedChapter.id) ===
-                false,
-            ),
-          ]);
+  const onSelectPress = useCallback(
+    (chapter: ChapterInfo) => {
+      if (selected.length === 0) {
+        navigateToChapter(chapter);
+      } else {
+        if (isSelected(chapter.id)) {
+          setSelected(sel => sel.filter(it => it.id !== chapter.id));
         } else {
-          setSelected(sel => [
-            ...sel,
-            chapter,
-            ...chapters.filter(
-              (chap: ChapterInfo) =>
-                (chap.id >= chapter.id || chap.id <= lastSelectedChapter.id) ===
-                false,
-            ),
-          ]);
+          setSelected(sel => [...sel, chapter]);
         }
       }
-    }
-  };
-  if (loading) {
-    return <NovelScreenLoading theme={theme} />;
-  }
-  if (!novel) {
-    return null;
-  }
-  const navigateToChapter = (chapter: ChapterInfo) => {
-    navigation.navigate('Chapter', { novel, chapter });
-  };
+    },
+    [selected, isSelected, navigateToChapter, setSelected],
+  );
 
-  const setCustomNovelCover = async () => {
+  const onSelectLongPress = useCallback(
+    (chapter: ChapterInfo) => {
+      if (selected.length === 0) {
+        if (!disableHapticFeedback) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
+        setSelected(sel => [...sel, chapter]);
+      } else {
+        if (selected.length === chapters.length) {
+          return;
+        }
+        const lastSelectedChapter = selected[selected.length - 1];
+        if (lastSelectedChapter.id !== chapter.id) {
+          if (lastSelectedChapter.id > chapter.id) {
+            setSelected(sel => [
+              ...sel,
+              chapter,
+              ...chapters.filter(
+                (chap: ChapterInfo) =>
+                  (chap.id <= chapter.id ||
+                    chap.id >= lastSelectedChapter.id) === false,
+              ),
+            ]);
+          } else {
+            setSelected(sel => [
+              ...sel,
+              chapter,
+              ...chapters.filter(
+                (chap: ChapterInfo) =>
+                  (chap.id >= chapter.id ||
+                    chap.id <= lastSelectedChapter.id) === false,
+              ),
+            ]);
+          }
+        }
+      }
+    },
+    [selected, chapters, disableHapticFeedback, setSelected],
+  );
+
+  const setCustomNovelCover = useCallback(async () => {
+    if (!novel) {
+      return;
+    }
     const newCover = await pickCustomNovelCover(novel);
     if (newCover) {
       setNovel({
@@ -527,27 +657,27 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         cover: newCover,
       });
     }
-  };
+  }, [novel, setNovel]);
 
-  const handleRefreshNovelCover = async () => {
+  const handleRefreshNovelCover = useCallback(async () => {
     if (novel) {
       await refreshNovelCover(novel.pluginId, novel.path, novel.id);
-    } else {
-      showToast('Novel data not available yet.');
+      getNovel();
     }
-  };
+  }, [novel, getNovel]);
 
-  const handleDownloadCover = async () => {
+  const handleDownloadCover = useCallback(async () => {
     if (!novel?.cover) {
       showToast('Cover image not available.');
       return;
     }
-
     let temporaryFileUri: string | undefined;
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        showToast(getString('novelScreen.storagePermissionDenied'));
+        showToast(
+          getString('backupScreen.permissionDenied' as keyof StringMap),
+        );
         return;
       }
 
@@ -557,7 +687,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
       // Download if it's a remote URL
       if (isRemote) {
         const fileExtension =
-          novel.cover.split('.').pop()?.split('?')[0] || 'jpg'; // Basic extension check
+          novel.cover.split('.').pop()?.split('?')[0] || 'jpg';
         temporaryFileUri =
           FileSystem.cacheDirectory + `cover_${novel.id}.${fileExtension}`;
         const { uri: downloadedUri } = await FileSystem.downloadAsync(
@@ -566,8 +696,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         );
         fileUri = downloadedUri;
       } else if (fileUri.startsWith('file://')) {
-        // For local files, MediaLibrary might need the path without 'file://', but createAssetAsync often handles it.
-        // Let's try passing it directly first. If issues arise, use fileUri.substring(7);
+        // Handled below by createAssetAsync
       } else {
         showToast('Invalid cover URI');
         return;
@@ -585,11 +714,13 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
       }
 
-      showToast(getString('novelScreen.coverSaved'));
+      showToast(getString('novelScreen.coverSaved' as keyof StringMap));
     } catch (error: any) {
       console.error('[Download Cover] Error:', error);
       showToast(
-        getString('novelScreen.errorSavingCover', { message: error.message }),
+        getString('novelScreen.errorSavingCover' as keyof StringMap, {
+          message: error.message,
+        }),
       );
     } finally {
       // Clean up temporary file if downloaded
@@ -607,7 +738,38 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
         }
       }
     }
-  };
+  }, [novel]);
+
+  const onPageScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const y = event.nativeEvent.contentOffset.y;
+      headerOpacity.value = y < 50 ? 0 : (y - 50) / 150;
+      const currentScrollPosition = Math.floor(y) ?? 0;
+      if (useFabForContinueReading && lastRead) {
+        setIsFabExtended(currentScrollPosition <= 0);
+      }
+    },
+    [useFabForContinueReading, lastRead, headerOpacity, setIsFabExtended],
+  );
+
+  // ===================== EFFECTS ========================
+
+  useEffect(() => {
+    refreshChapters();
+  }, [downloadQueue, refreshChapters]);
+
+  useFocusEffect(refreshChapters);
+
+  // =================== EARLY RETURNS ====================
+
+  if (loading) {
+    return <NovelScreenLoading theme={theme} />;
+  }
+  if (!novel) {
+    return null;
+  }
+
+  // =================== RENDER ========================
 
   return (
     <Drawer
@@ -635,7 +797,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
               <NovelAppbar
                 novel={novel}
                 chapters={chapters}
-                deleteChapters={deleteChs}
+                deleteChapters={deleteAllDownloadedChapters}
                 deleteTranslations={deleteTranslations}
                 downloadChapters={downloadChs}
                 showEditInfoModal={showEditInfoModal}
@@ -648,6 +810,11 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                 goBack={navigation.goBack}
                 headerOpacity={headerOpacity}
                 refreshNovelCover={handleRefreshNovelCover}
+                translateChapters={translateChapters}
+                translateNovelMetadata={translateNovelMetadata}
+                hasAnyTranslation={hasAnyTranslation}
+                showTranslatedText={showTranslatedText}
+                toggleShowTranslatedText={toggleShowTranslatedText}
               />
             ) : (
               <Animated.View
@@ -706,6 +873,7 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                   onSelectLongPress={onSelectLongPress}
                   navigateToChapter={navigateToChapter}
                   novelName={name}
+                  showTranslatedText={showTranslatedText}
                 />
               )}
               keyExtractor={item => 'chapter_' + item.id}
@@ -728,9 +896,18 @@ const Novel = ({ route, navigation }: NovelScreenProps) => {
                   onRefreshPage={onRefreshPage}
                   openDrawer={openDrawer}
                   handleDownloadCover={handleDownloadCover}
+                  showTranslatedText={showTranslatedText}
                 />
               }
-              refreshControl={refreshControl()}
+              refreshControl={
+                <RefreshControl
+                  progressViewOffset={topInset + 32}
+                  onRefresh={onRefresh}
+                  refreshing={updating}
+                  colors={[theme.primary]}
+                  progressBackgroundColor={theme.onPrimary}
+                />
+              }
               onScroll={onPageScroll}
             />
           </View>

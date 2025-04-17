@@ -17,6 +17,7 @@ import { downloadChapter } from './download/downloadChapter';
 import {
   translateChapterTask,
   DependencyMissingError,
+  translateNovelMetaTask,
 } from './translation/TranslationService';
 
 export type BackgroundTask =
@@ -40,7 +41,8 @@ export type BackgroundTask =
   | { name: 'SELF_HOST_RESTORE'; data: SelfHostData }
   | { name: 'MIGRATE_NOVEL'; data: MigrateNovelData }
   | DownloadChapterTask
-  | TranslateChapterTask;
+  | TranslateChapterTask
+  | TranslateNovelMetaTask;
 export type DownloadChapterTask = {
   name: 'DOWNLOAD_CHAPTER';
   data: {
@@ -60,6 +62,17 @@ export type TranslateChapterTask = {
     pluginId: string;
     novelName: string;
     chapterName: string;
+    apiKey: string;
+    model: string;
+    instruction: string;
+  };
+};
+
+export type TranslateNovelMetaTask = {
+  name: 'TRANSLATE_NOVEL_META';
+  data: {
+    novelId: number;
+    novelName: string;
     apiKey: string;
     model: string;
     instruction: string;
@@ -206,6 +219,7 @@ export default class ServiceManager {
         'IMPORT_EPUB',
         'MIGRATE_NOVEL',
         'TRANSLATE_CHAPTER',
+        'TRANSLATE_NOVEL_META',
       ] as Array<BackgroundTask['name']>
     ).includes(task.name);
   }
@@ -283,6 +297,8 @@ export default class ServiceManager {
         return downloadChapter(task.task.data, this.setMeta.bind(this));
       case 'TRANSLATE_CHAPTER':
         return translateChapterTask(task.task.data, this.setMeta.bind(this));
+      case 'TRANSLATE_NOVEL_META':
+        return translateNovelMetaTask(task.task.data, this.setMeta.bind(this));
       default:
         return;
     }
@@ -433,9 +449,12 @@ export default class ServiceManager {
             }
             break;
           case 'TRANSLATE_CHAPTER':
+          case 'TRANSLATE_NOVEL_META':
             if (
               activeTranslationCount < MAX_TRANSLATIONS &&
-              !isDownloadTaskPending(task.task.data.chapterId, taskList)
+              (task.task.name === 'TRANSLATE_CHAPTER'
+                ? !isDownloadTaskPending(task.task.data.chapterId, taskList)
+                : true)
             ) {
               canStart = true;
             }
@@ -452,7 +471,10 @@ export default class ServiceManager {
           // Increment counters *tentatively* to prevent over-scheduling in this loop iteration
           if (task.task.name === 'DOWNLOAD_CHAPTER') {
             activeDownloadCount++;
-          } else if (task.task.name === 'TRANSLATE_CHAPTER') {
+          } else if (
+            task.task.name === 'TRANSLATE_CHAPTER' ||
+            task.task.name === 'TRANSLATE_NOVEL_META'
+          ) {
             activeTranslationCount++;
           } else {
             currentOtherRunning++;
@@ -460,7 +482,8 @@ export default class ServiceManager {
           // Limit starting only one 'OTHER' task per loop iteration to be safe
           if (
             task.task.name !== 'DOWNLOAD_CHAPTER' &&
-            task.task.name !== 'TRANSLATE_CHAPTER'
+            task.task.name !== 'TRANSLATE_CHAPTER' &&
+            task.task.name !== 'TRANSLATE_NOVEL_META'
           ) {
             break;
           }
@@ -546,6 +569,8 @@ export default class ServiceManager {
         return (
           'Translate ' + task.data.novelName + ' - ' + task.data.chapterName
         );
+      case 'TRANSLATE_NOVEL_META':
+        return 'Translate Novel Meta: ' + task.data.novelName;
       case 'IMPORT_EPUB':
         return 'Import Epub ' + task.data.filename;
       case 'MIGRATE_NOVEL':

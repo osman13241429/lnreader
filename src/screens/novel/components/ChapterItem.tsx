@@ -26,6 +26,7 @@ interface ChapterItemProps {
   isLocal: boolean;
   isUpdateCard?: boolean;
   novelName: string;
+  showTranslatedText: boolean;
 }
 
 const ChapterItem: React.FC<ChapterItemProps> = ({
@@ -43,9 +44,17 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
   left,
   isUpdateCard,
   novelName,
+  showTranslatedText,
 }) => {
-  const { id, name, releaseTime, chapterNumber, progress, hasTranslation } =
-    chapter;
+  const {
+    id,
+    name,
+    releaseTime,
+    chapterNumber,
+    progress,
+    hasTranslation,
+    translatedName,
+  } = chapter;
   const {
     value: isMenuVisible,
     setTrue: showMenu,
@@ -113,7 +122,9 @@ const ChapterItem: React.FC<ChapterItemProps> = ({
               numberOfLines={1}
             >
               {showChapterTitles
-                ? name
+                ? showTranslatedText && translatedName
+                  ? translatedName
+                  : name
                 : getString('novelScreen.chapterChapnum', {
                     num: chapterNumber,
                   })}

@@ -13,12 +13,18 @@ export interface NovelInfo {
   inLibrary: boolean;
   isLocal: boolean;
   totalPages: number;
+  translatedName?: string;
+  translatedSummary?: string;
 }
 
 export interface LibraryNovelInfo extends NovelInfo {
   category: string;
   chaptersUnread: number;
   chaptersDownloaded: number;
+  position?: number;
+  hasTranslation?: boolean;
+  translatedName?: string;
+  displayName: string;
 }
 
 export interface ChapterInfo {
@@ -37,6 +43,7 @@ export interface ChapterInfo {
   progress: number | null;
   position?: number;
   hasTranslation?: boolean;
+  translatedName?: string;
 }
 
 export interface DownloadedChapter extends ChapterInfo {

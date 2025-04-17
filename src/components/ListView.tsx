@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { StyleSheet, View, Text, Pressable } from 'react-native';
 
 import { Image } from 'react-native';
@@ -6,6 +6,8 @@ import { coverPlaceholderColor } from '../theme/colors';
 
 import color from 'color';
 import { ThemeColors } from '@theme/types';
+import { defaultCover } from '@plugins/helpers/constants';
+import { getUserAgent } from '@hooks/persisted/useUserAgent';
 import { NovelItem } from '@plugins/types';
 import { NovelInfo } from '@database/types';
 
@@ -44,15 +46,24 @@ const ListView = ({
     >
       <Image
         source={{
-          uri: item.cover,
+          uri: item.cover || defaultCover,
+          headers: { 'User-Agent': getUserAgent() },
         }}
-        style={[styles.extensionIcon, inLibraryBadge ? { opacity: 0.5 } : {}]}
+        style={[
+          styles.extensionIcon,
+          inLibraryBadge ? { opacity: 0.5 } : {},
+          isSelected && { opacity: 0.8 },
+        ]}
       />
       <Text
-        style={[{ color: theme.onSurface }, styles.novelName]}
+        style={[
+          { color: theme.onSurface, flex: 1 },
+          styles.novelName,
+          isSelected && { color: theme.primary },
+        ]}
         numberOfLines={1}
       >
-        {item.name}
+        {item.displayName}
       </Text>
       <View style={styles.badgeContainer}>
         {downloadBadge}
@@ -63,7 +74,7 @@ const ListView = ({
   );
 };
 
-export default ListView;
+export default memo(ListView);
 
 const styles = StyleSheet.create({
   listView: {

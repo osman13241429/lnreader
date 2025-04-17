@@ -7,7 +7,12 @@ import FileManager from '@native/FileManager';
 import { NOVEL_STORAGE } from '@utils/Storages';
 import { saveTranslation } from '@database/queries/TranslationQueries';
 import { db } from '@database/db';
-import { checkIfChapterHasTranslation } from '@database/queries/TranslationQueries';
+import { getNovelById } from '@database/queries/NovelQueries';
+import {
+  getChapterInfo,
+  updateChapterTranslationState,
+  getTranslation,
+} from '@database/queries/ChapterQueries';
 
 export interface TranslationResponse {
   content: string;
@@ -246,15 +251,17 @@ export const translateText = async (
 
       // Handle specific error cases
       if (response.status === 429) {
-        if (errorData.error?.metadata?.provider_name) {
-          throw new Error(
-            `Rate limit exceeded for provider: ${errorData.error.metadata.provider_name}. Please try again later or select a different model.`,
-          );
-        } else {
-          throw new Error(
-            'Rate limit exceeded. Please try again later or select a different model.',
-          );
+        // Construct a more user-friendly message for rate limits/quotas
+        let detail =
+          'You have exceeded your quota or hit a rate limit for the selected model.';
+        if (errorData?.error?.message) {
+          // Try to include the specific message from the provider if available
+          // Example: "You exceeded your current quota..."
+          detail += ` Provider message: ${errorData.error.message}`;
         }
+        detail +=
+          ' Please check your API key quota, try a different model, or disable parallel translations if enabled.';
+        throw new Error(detail);
       } else if (response.status === 403) {
         throw new Error(
           'Access denied: You may not have permission to use this model with your API key.',
@@ -274,13 +281,35 @@ export const translateText = async (
 
     const data = await response.json();
 
-    // Validate response format
+    // Check for explicit error in the first choice
+    if (data.choices?.[0]?.error) {
+      const choiceError = data.choices[0].error;
+      const providerName =
+        choiceError.metadata?.provider_name ||
+        data.provider ||
+        'Unknown Provider';
+      const errorMessage = choiceError.message || 'Unknown provider error';
+      const errorCode = choiceError.code || 'N/A';
+      console.error(
+        `[ERROR] Provider error received: Provider=${providerName}, Code=${errorCode}, Message=${errorMessage}, RawChoiceError=`,
+        JSON.stringify(choiceError),
+      );
+      throw new Error(
+        `Translation failed: Provider error (${providerName} - Code: ${errorCode}): ${errorMessage}`,
+      );
+    }
+
+    // Validate expected response format otherwise
     if (
       !data.choices ||
       !data.choices[0] ||
       !data.choices[0].message ||
-      !data.choices[0].message.content
+      typeof data.choices[0].message.content !== 'string' // Check content is a string
     ) {
+      console.error(
+        '[ERROR] Unexpected API response format. Logging raw data:',
+        JSON.stringify(data),
+      ); // Log raw data
       throw new Error('Unexpected response format from translation service');
     }
 
@@ -329,15 +358,19 @@ export const translateChapterTask = async (
   }));
 
   try {
-    // 1. Check if already translated
+    // 1. Check if already translated (content or name)
     setMeta(meta => ({ ...meta, progressText: 'Checking existing...' }));
-    const alreadyTranslated = await checkIfChapterHasTranslation(chapterId);
-    if (alreadyTranslated) {
+    const chapterInfo = await getChapterInfo(chapterId); // Helper to get chapter info including translatedName
+    if (!chapterInfo) {
+      throw new Error('Chapter not found in database.');
+    }
+
+    if (chapterInfo.hasTranslation && chapterInfo.translatedName) {
       setMeta(meta => ({
         ...meta,
         progress: 1,
         isRunning: false,
-        progressText: 'Already translated',
+        progressText: 'Already translated (content & name)',
       }));
       return;
     }
@@ -345,7 +378,7 @@ export const translateChapterTask = async (
     // 2. Check if chapter content exists locally
     setMeta(meta => ({
       ...meta,
-      progress: 0.2,
+      progress: 0.1, // Adjusted progress
       progressText: 'Locating content...',
     }));
     const filePath = `${NOVEL_STORAGE}/${pluginId}/${novelId}/${chapterId}/index.html`;
@@ -360,7 +393,7 @@ export const translateChapterTask = async (
     // 3. Read content
     setMeta(meta => ({
       ...meta,
-      progress: 0.4,
+      progress: 0.2, // Adjusted progress
       progressText: 'Reading content...',
     }));
     const chapterContent = await FileManager.readFile(filePath);
@@ -368,54 +401,248 @@ export const translateChapterTask = async (
       throw new Error('Chapter content is empty.');
     }
 
-    // 4. Translate using the core translateText function
-    setMeta(meta => ({
-      ...meta,
-      progress: 0.6,
-      progressText: 'Translating...',
-    }));
-    const translationResult = await translateText(
-      apiKey,
-      chapterContent,
-      model,
-      instruction,
-    );
+    let translatedContent = '';
+    let translatedTitle = chapterInfo.translatedName; // Use existing if available
+    let translationModel = '';
+    let translationInstruction = '';
 
-    // 5. Process and save
-    setMeta(meta => ({ ...meta, progress: 0.8, progressText: 'Saving...' }));
-    const processedContent = translationResult.content
-      .replace(/\n/g, '<br/>')
-      .replace(/ {2}/g, '&nbsp;&nbsp;');
-
-    await saveTranslation(
-      chapterId,
-      processedContent,
-      translationResult.model,
-      translationResult.instruction,
-    );
-
-    // Update hasTranslation flag (redundant with saveTranslation but safe to keep)
-    db.transaction(tx => {
-      tx.executeSql(
-        'UPDATE Chapter SET hasTranslation = 1 WHERE id = ?',
-        [chapterId],
-        () => {},
-        (_, _error) => {
-          return false;
-        },
+    // 4. Translate Content (if needed)
+    if (!chapterInfo.hasTranslation) {
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.4, // Adjusted progress
+        progressText: 'Translating content...',
+      }));
+      const contentResult = await translateText(
+        apiKey,
+        chapterContent,
+        model,
+        instruction,
       );
-    });
+      translatedContent = contentResult.content
+        .replace(/\n/g, '<br/>')
+        .replace(/ {2}/g, '&nbsp;&nbsp;');
+      translationModel = contentResult.model;
+      translationInstruction = contentResult.instruction;
+    } else {
+      // If content is already translated, fetch existing translation details
+      const existingTranslation = await getTranslation(chapterId);
+      if (existingTranslation) {
+        translatedContent = existingTranslation.content; // Need existing content for saving later
+        translationModel = existingTranslation.model;
+        translationInstruction = existingTranslation.instruction || '';
+      } else {
+        // This case shouldn't happen if hasTranslation is true, but handle defensively
+        throw new Error(
+          'Inconsistent state: Chapter marked as translated but no translation found.',
+        );
+      }
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.6, // Skip content translation progress
+        progressText: 'Content already translated',
+      }));
+    }
 
-    // 6. Mark as complete
+    // 5. Translate Title (if needed and original exists)
+    if (
+      !translatedTitle &&
+      chapterInfo.name &&
+      chapterInfo.name.trim() !== ''
+    ) {
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.7, // Adjusted progress
+        progressText: 'Translating title...',
+      }));
+      // Small delay before title translation
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const titleResult = await translateText(
+        apiKey,
+        chapterInfo.name, // Use original name from fetched chapterInfo
+        model,
+        'Translate only the title provided.', // Simple instruction for title
+      );
+      translatedTitle = titleResult.content.trim(); // Trim potential whitespace
+    } else {
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.8, // Skip title translation progress
+        progressText: 'Title already translated or empty',
+      }));
+    }
+
+    // 6. Save content translation (if content was translated) and update chapter title
+    setMeta(meta => ({ ...meta, progress: 0.9, progressText: 'Saving...' }));
+    if (!chapterInfo.hasTranslation && translatedContent) {
+      await saveTranslation(
+        chapterId,
+        translatedContent,
+        translationModel,
+        translationInstruction,
+      );
+    }
+
+    // Update hasTranslation flag and translatedName in Chapter table
+    await updateChapterTranslationState(chapterId, translatedTitle);
+
+    // 7. Mark as complete
     setMeta(meta => ({
       ...meta,
       progress: 1,
       isRunning: false,
-      progressText: 'Translation complete',
+      progressText: 'Translation complete (content & title)',
     }));
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown translation error';
+    setMeta(meta => ({
+      ...meta,
+      isRunning: false,
+      progressText: `Error: ${errorMessage}`,
+    }));
+    throw error;
+  }
+};
+
+// Added: Task implementation for translating novel metadata
+export const translateNovelMetaTask = async (
+  data: TranslateNovelMetaTask['data'],
+  setMeta: (
+    transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+  ) => void,
+): Promise<void> => {
+  const { novelId, apiKey, model, instruction, novelName } = data;
+  // console.log(`[TASK_START] translateNovelMetaTask for Novel ID: ${novelId}, Name: ${novelName}`);
+
+  setMeta(meta => ({
+    ...meta,
+    isRunning: true,
+    progress: 0,
+    progressText: `Starting meta translation for ${novelName}...`,
+  }));
+
+  try {
+    // 1. Get current novel info
+    setMeta(meta => ({
+      ...meta,
+      progress: 0.1,
+      progressText: 'Fetching novel details...',
+    }));
+    const novel = await getNovelById(novelId);
+    // console.log(`[FETCH_NOVEL] Fetched novel data:`, novel); // Log fetched data
+
+    if (!novel) {
+      // console.error(`[ERROR] Novel with ID ${novelId} not found.`);
+      throw new Error(`Novel with ID ${novelId} not found.`);
+    }
+
+    // 2. Check if already translated
+    // console.log(`[CHECK_TRANSLATED] Checking existing: Name='${novel.translatedName}', Summary='${novel.translatedSummary ? novel.translatedSummary.substring(0,30)+'...':null}'`);
+    if (novel.translatedName && novel.translatedSummary) {
+      // console.log(`[ALREADY_TRANSLATED] Metadata seems to be already translated. Exiting task.`);
+      setMeta(meta => ({
+        ...meta,
+        progress: 1,
+        isRunning: false,
+        progressText: 'Metadata already translated',
+      }));
+      return;
+    }
+
+    // 3. Translate Name (if needed)
+    let translatedName = novel.translatedName;
+    if (!translatedName && novel.name) {
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.3,
+        progressText: 'Translating title...',
+      }));
+      // console.log(`[TRANSLATE_NAME] Starting name translation for: '${novel.name}'`);
+      const nameResult = await translateText(
+        apiKey,
+        novel.name,
+        model,
+        instruction,
+      );
+      translatedName = nameResult.content;
+      // console.log(`[TRANSLATE_NAME_DONE] Translated name result: '${translatedName}'`);
+    } else {
+      // console.log(`[TRANSLATE_NAME_SKIP] Skipping name translation (already exists or original is empty).`);
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.5,
+        progressText: 'Title already translated or empty',
+      }));
+    }
+
+    // Add a small delay before translating summary
+    // console.log('[DELAY] Waiting 1 second before summary translation...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 4. Translate Summary (if needed)
+    let translatedSummary = novel.translatedSummary;
+    if (!translatedSummary && novel.summary) {
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.6,
+        progressText: 'Translating summary...',
+      }));
+      // console.log(`[TRANSLATE_SUMMARY] Starting summary translation for: '${novel.summary.substring(0, 50)}...'`);
+      const summaryResult = await translateText(
+        apiKey,
+        novel.summary,
+        model,
+        instruction,
+      );
+      translatedSummary = summaryResult.content;
+      // console.log(`[TRANSLATE_SUMMARY_DONE] Translated summary result: '${translatedSummary.substring(0, 50)}...'`);
+    } else {
+      // console.log(`[TRANSLATE_SUMMARY_SKIP] Skipping summary translation (already exists or original is empty).`);
+      setMeta(meta => ({
+        ...meta,
+        progress: 0.8,
+        progressText: 'Summary already translated or empty',
+      }));
+    }
+
+    // 5. Update database
+    setMeta(meta => ({
+      ...meta,
+      progress: 0.9,
+      progressText: 'Saving metadata... ',
+    }));
+    // console.log(`[DB_UPDATE] Attempting to update DB with Name='${translatedName}', Summary='${translatedSummary ? translatedSummary.substring(0,30)+'...':null}'`);
+    await new Promise<void>((resolve, reject) => {
+      db.transaction(tx => {
+        tx.executeSql(
+          'UPDATE Novel SET translatedName = ?, translatedSummary = ? WHERE id = ?',
+          [translatedName || null, translatedSummary || null, novelId],
+          () => {
+            // console.log(`[DB_UPDATE_SUCCESS] Database updated successfully for Novel ID: ${novelId}`);
+            resolve();
+          },
+          (_, error) => {
+            // console.error(`[DB_UPDATE_ERROR] Failed to update database for Novel ID: ${novelId}`, error);
+            reject(error);
+            return false;
+          },
+        );
+      });
+    });
+
+    // 6. Mark as complete
+    // console.log(`[TASK_COMPLETE] translateNovelMetaTask finished for Novel ID: ${novelId}`);
+    setMeta(meta => ({
+      ...meta,
+      progress: 1,
+      isRunning: false,
+      progressText: 'Metadata translation complete',
+    }));
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown translation error';
+    // console.error(`[TASK_ERROR] Error in translateNovelMetaTask for Novel ID: ${novelId}:`, errorMessage, error);
     setMeta(meta => ({
       ...meta,
       isRunning: false,

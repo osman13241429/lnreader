@@ -15,6 +15,7 @@ export const createChapterTableQuery = `
         position INTEGER DEFAULT 0,
         progress INTEGER,
         hasTranslation INTEGER DEFAULT 0,
+        translatedName TEXT,
         UNIQUE(path, novelId),
         FOREIGN KEY (novelId) REFERENCES Novel(id) ON DELETE CASCADE
     )

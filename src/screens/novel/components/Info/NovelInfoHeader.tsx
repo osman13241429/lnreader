@@ -51,6 +51,7 @@ interface NovelInfoHeaderProps {
   openDrawer: () => void;
   onRefreshPage: (page: string) => void;
   handleDownloadCover: () => Promise<void>;
+  showTranslatedText: boolean;
 }
 
 const getStatusIcon = (status?: string) => {
@@ -80,6 +81,7 @@ const NovelInfoHeader = ({
   openDrawer,
   onRefreshPage,
   handleDownloadCover,
+  showTranslatedText,
 }: NovelInfoHeaderProps) => {
   const { hideBackdrop = false } = useAppSettings();
 
@@ -124,7 +126,9 @@ const NovelInfoHeader = ({
                   );
                 }}
               >
-                {novel.name}
+                {showTranslatedText && novel.translatedName
+                  ? novel.translatedName
+                  : novel.name}
               </NovelTitle>
             </Row>
             {novel.author ? (
@@ -182,7 +186,11 @@ const NovelInfoHeader = ({
           theme={theme}
         />
         <NovelSummary
-          summary={novel.summary || getString('novelScreen.noSummary')}
+          summary={
+            showTranslatedText && novel.translatedSummary
+              ? novel.translatedSummary
+              : novel.summary || getString('novelScreen.noSummary')
+          }
           isExpanded={!novel.inLibrary}
           theme={theme}
         />

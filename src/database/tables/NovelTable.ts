@@ -13,6 +13,8 @@ export const createNovelTableQuery = `
     inLibrary INTEGER DEFAULT 0,
     isLocal INTEGER DEFAULT 0,
     totalPages INTEGER DEFAULT 0,
+    translatedName TEXT,
+    translatedSummary TEXT,
     UNIQUE(path, pluginId)
   );
 `;
