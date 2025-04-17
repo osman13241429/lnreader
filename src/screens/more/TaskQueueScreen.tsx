@@ -200,7 +200,11 @@ const DownloadQueue = ({ navigation }: TaskQueueScreenProps) => {
             {item.meta.progressText}
           </Text>
         ) : null}
-        {item.meta.isRunning ? (
+        {item.meta.error ? (
+          <Text style={{ color: theme.error, fontSize: 12, marginTop: 8 }}>
+            Error: {item.meta.error}
+          </Text>
+        ) : item.meta.isRunning ? (
           <ProgressBar
             indeterminate={item.meta.progress === undefined}
             progress={item.meta.progress}

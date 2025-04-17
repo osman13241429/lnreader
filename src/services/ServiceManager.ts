@@ -16,9 +16,14 @@ import { migrateNovel, MigrateNovelData } from './migrate/migrateNovel';
 import { downloadChapter } from './download/downloadChapter';
 import {
   translateChapterTask,
-  DependencyMissingError,
   translateNovelMetaTask,
 } from './translation/TranslationService';
+import { sleep } from '@utils/sleep';
+
+// Define constants for default parallel limits
+const MAX_PARALLEL_DOWNLOADS_DEFAULT = 3;
+const MAX_PARALLEL_TRANSLATIONS_DEFAULT = 3;
+const MAX_PARALLEL_OTHER_DEFAULT = 1;
 
 export type BackgroundTask =
   | {
@@ -84,6 +89,7 @@ export type BackgroundTaskMetadata = {
   isRunning: boolean;
   progress: number | undefined;
   progressText: string | undefined;
+  error?: string | null;
 };
 
 export type QueuedBackgroundTask = {
@@ -118,22 +124,18 @@ export default class ServiceManager {
     return this.instance;
   }
 
-  // Getter for parallel processing setting (legacy support)
   get isParallelProcessingEnabled() {
     return this.parallelProcessingEnabled;
   }
 
-  // Getter for parallel downloads setting
   get isParallelDownloadsEnabled() {
     return this.parallelDownloadsEnabled;
   }
 
-  // Getter for parallel translations setting
   get isParallelTranslationsEnabled() {
     return this.parallelTranslationsEnabled;
   }
 
-  // Toggle parallel processing and persist the setting (legacy support)
   toggleParallelProcessing() {
     this.parallelProcessingEnabled = !this.parallelProcessingEnabled;
     setMMKVObject(this.PARALLEL_PROCESSING_KEY, this.parallelProcessingEnabled);
@@ -145,7 +147,6 @@ export default class ServiceManager {
     return this.parallelProcessingEnabled;
   }
 
-  // Toggle parallel downloads specifically
   toggleParallelDownloads() {
     this.parallelDownloadsEnabled = !this.parallelDownloadsEnabled;
     setMMKVObject(this.PARALLEL_DOWNLOADS_KEY, this.parallelDownloadsEnabled);
@@ -156,7 +157,6 @@ export default class ServiceManager {
     return this.parallelDownloadsEnabled;
   }
 
-  // Toggle parallel translations specifically
   toggleParallelTranslations() {
     this.parallelTranslationsEnabled = !this.parallelTranslationsEnabled;
     setMMKVObject(
@@ -170,7 +170,6 @@ export default class ServiceManager {
     return this.parallelTranslationsEnabled;
   }
 
-  // Set parallel downloads explicitly
   setParallelDownloads(enabled: boolean) {
     this.parallelDownloadsEnabled = enabled;
     setMMKVObject(this.PARALLEL_DOWNLOADS_KEY, this.parallelDownloadsEnabled);
@@ -179,7 +178,6 @@ export default class ServiceManager {
     this.updateGeneralParallelSetting();
   }
 
-  // Set parallel translations explicitly
   setParallelTranslations(enabled: boolean) {
     this.parallelTranslationsEnabled = enabled;
     setMMKVObject(
@@ -191,7 +189,6 @@ export default class ServiceManager {
     this.updateGeneralParallelSetting();
   }
 
-  // Update the general parallel setting based on individual settings
   private updateGeneralParallelSetting() {
     // The general setting is true if either specific setting is true
     this.parallelProcessingEnabled =
@@ -199,7 +196,6 @@ export default class ServiceManager {
     setMMKVObject(this.PARALLEL_PROCESSING_KEY, this.parallelProcessingEnabled);
   }
 
-  // Set parallel processing explicitly (legacy support)
   setParallelProcessing(enabled: boolean) {
     this.parallelProcessingEnabled = enabled;
     setMMKVObject(this.PARALLEL_PROCESSING_KEY, this.parallelProcessingEnabled);
@@ -244,29 +240,132 @@ export default class ServiceManager {
       });
     }
   }
+
   setMeta(
     transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
   ) {
     let taskList = [...this.getTaskList()];
-    taskList[0] = {
-      ...taskList[0],
-      meta: transformer(taskList[0].meta),
-    };
+    if (!taskList[0]) {
+      return;
+    } // Guard against empty list
 
-    if (taskList[0].meta.isRunning) {
-      BackgroundService.updateNotification({
-        taskTitle: taskList[0].meta.name,
-        taskDesc: taskList[0].meta.progressText ?? '',
-        progressBar: {
-          indeterminate: taskList[0].meta.progress === undefined,
-          value: (taskList[0].meta.progress || 0) * 100,
-          max: 100,
-        },
-      });
+    const currentTask = taskList[0];
+    const newMeta = transformer(currentTask.meta);
+
+    // Only update if meta actually changed to avoid unnecessary writes
+    if (JSON.stringify(currentTask.meta) !== JSON.stringify(newMeta)) {
+      taskList[0] = {
+        ...currentTask,
+        meta: newMeta,
+      };
+
+      // Update notification only if the task is running
+      if (newMeta.isRunning) {
+        BackgroundService.updateNotification({
+          taskTitle: newMeta.name,
+          taskDesc: newMeta.progressText ?? '',
+          progressBar: {
+            indeterminate: newMeta.progress === undefined,
+            value: (newMeta.progress || 0) * 100,
+            max: 100,
+          },
+        });
+      }
+
+      setMMKVObject(this.STORE_KEY, taskList);
     }
-
-    setMMKVObject(this.STORE_KEY, taskList);
   }
+
+  private _executeImportEpub(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return importEpub(data, setMeta);
+  }
+
+  private _executeUpdateLibrary(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return updateLibrary(data || {}, setMeta);
+  }
+
+  private _executeDriveBackup(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return createDriveBackup(data, setMeta);
+  }
+
+  private _executeDriveRestore(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return driveRestore(data, setMeta);
+  }
+
+  private _executeSelfHostBackup(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return createSelfHostBackup(data, setMeta);
+  }
+
+  private _executeSelfHostRestore(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return selfHostRestore(data, setMeta);
+  }
+
+  private _executeMigrateNovel(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return migrateNovel(data, setMeta);
+  }
+
+  private _executeDownloadChapter(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return downloadChapter(data, setMeta);
+  }
+
+  private _executeTranslateChapter(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return translateChapterTask(data, setMeta);
+  }
+
+  private _executeTranslateNovelMeta(
+    data: any,
+    setMeta: (
+      transformer: (meta: BackgroundTaskMetadata) => BackgroundTaskMetadata,
+    ) => void,
+  ) {
+    return translateNovelMetaTask(data, setMeta);
+  }
+
   async executeTask(task: QueuedBackgroundTask) {
     await BackgroundService.updateNotification({
       taskTitle: task.meta.name,
@@ -278,34 +377,36 @@ export default class ServiceManager {
       },
     });
 
+    const boundSetMeta = this.setMeta.bind(this);
+
     switch (task.task.name) {
       case 'IMPORT_EPUB':
-        return importEpub(task.task.data, this.setMeta.bind(this));
+        return this._executeImportEpub(task.task.data, boundSetMeta);
       case 'UPDATE_LIBRARY':
-        return updateLibrary(task.task.data || {}, this.setMeta.bind(this));
+        return this._executeUpdateLibrary(task.task.data, boundSetMeta);
       case 'DRIVE_BACKUP':
-        return createDriveBackup(task.task.data, this.setMeta.bind(this));
+        return this._executeDriveBackup(task.task.data, boundSetMeta);
       case 'DRIVE_RESTORE':
-        return driveRestore(task.task.data, this.setMeta.bind(this));
+        return this._executeDriveRestore(task.task.data, boundSetMeta);
       case 'SELF_HOST_BACKUP':
-        return createSelfHostBackup(task.task.data, this.setMeta.bind(this));
+        return this._executeSelfHostBackup(task.task.data, boundSetMeta);
       case 'SELF_HOST_RESTORE':
-        return selfHostRestore(task.task.data, this.setMeta.bind(this));
+        return this._executeSelfHostRestore(task.task.data, boundSetMeta);
       case 'MIGRATE_NOVEL':
-        return migrateNovel(task.task.data, this.setMeta.bind(this));
+        return this._executeMigrateNovel(task.task.data, boundSetMeta);
       case 'DOWNLOAD_CHAPTER':
-        return downloadChapter(task.task.data, this.setMeta.bind(this));
+        return this._executeDownloadChapter(task.task.data, boundSetMeta);
       case 'TRANSLATE_CHAPTER':
-        return translateChapterTask(task.task.data, this.setMeta.bind(this));
+        return this._executeTranslateChapter(task.task.data, boundSetMeta);
       case 'TRANSLATE_NOVEL_META':
-        return translateNovelMetaTask(task.task.data, this.setMeta.bind(this));
+        return this._executeTranslateNovelMeta(task.task.data, boundSetMeta);
       default:
-        return;
+        console.warn('Unknown background task:', task.task.name);
+        return Promise.resolve();
     }
   }
 
   static async lauch() {
-    // retrieve class instance because this is running in different context
     const manager = ServiceManager.manager;
     const doneTasks: Record<string, number> = {};
 
@@ -336,7 +437,6 @@ export default class ServiceManager {
     }
   }
 
-  // Original sequential processing logic
   private static async launchSequential(
     manager: ServiceManager,
     doneTasks: Record<string, number>,
@@ -358,46 +458,61 @@ export default class ServiceManager {
           },
           trigger: null,
         });
+        // Update metadata with error information
+        manager.setMeta(meta => ({
+          ...meta,
+          isRunning: false,
+          progress: undefined,
+          error: error?.message || String(error),
+        }));
       } finally {
+        // This is the sequential logic's way of removing the task
+        // We need a different mechanism for parallel
         setMMKVObject(manager.STORE_KEY, manager.getTaskList().slice(1));
       }
     }
   }
 
-  // New parallel processing logic
   private static async launchParallel(
     manager: ServiceManager,
     doneTasks: Record<string, number>,
   ) {
     // Use a map to track running tasks and their promises
-    const runningTasks = new Map<string, Promise<void>>();
-    const MAX_DOWNLOADS = manager.isParallelDownloadsEnabled ? 3 : 1;
-    const MAX_TRANSLATIONS = manager.isParallelTranslationsEnabled ? 3 : 1;
-    const MAX_OTHER = 1;
+    // Key: Unique task identifier (e.g., index in original queue or a generated UUID if needed)
+    // Value: { task: QueuedBackgroundTask; promise: Promise<void> }
+    const runningTasks = new Map<
+      string,
+      { task: QueuedBackgroundTask; promise: Promise<void> }
+    >();
 
-    // Helper to count active tasks of a specific type
+    const MAX_DOWNLOADS = manager.isParallelDownloadsEnabled
+      ? MAX_PARALLEL_DOWNLOADS_DEFAULT
+      : 1;
+    const MAX_TRANSLATIONS = manager.isParallelTranslationsEnabled
+      ? MAX_PARALLEL_TRANSLATIONS_DEFAULT
+      : 1;
+    const MAX_OTHER = MAX_PARALLEL_OTHER_DEFAULT;
+
     const getActiveTaskCount = (name: BackgroundTask['name']): number => {
       let count = 0;
-      for (const taskId of runningTasks.keys()) {
-        const runningTask = JSON.parse(taskId) as BackgroundTask;
-        if (runningTask.name === name) {
+      for (const runningTaskInfo of runningTasks.values()) {
+        if (runningTaskInfo.task.task.name === name) {
           count++;
         }
       }
       return count;
     };
 
-    // Helper to check if a download dependency exists (running or queued)
     const isDownloadTaskPending = (
       chapterId: number,
       currentTaskList: QueuedBackgroundTask[],
     ): boolean => {
       // Check currently executing tasks
-      for (const taskId of runningTasks.keys()) {
-        const runningTask = JSON.parse(taskId) as BackgroundTask;
+      for (const runningTaskInfo of runningTasks.values()) {
+        const runningTask = runningTaskInfo.task.task;
         if (
           runningTask.name === 'DOWNLOAD_CHAPTER' &&
-          runningTask.data.chapterId === chapterId
+          (runningTask as DownloadChapterTask).data.chapterId === chapterId // Assert type for data access
         ) {
           return true;
         }
@@ -406,7 +521,7 @@ export default class ServiceManager {
       return currentTaskList.some(
         t =>
           t.task.name === 'DOWNLOAD_CHAPTER' &&
-          t.task.data.chapterId === chapterId,
+          (t.task as DownloadChapterTask).data.chapterId === chapterId, // Assert type for data access
       );
     };
 
@@ -417,147 +532,139 @@ export default class ServiceManager {
       }
 
       let startedNewTask = false;
-      const tasksToStart: QueuedBackgroundTask[] = [];
+      const runningTaskIdentifiers = new Set(runningTasks.keys()); // Keep track of which tasks are running via ID
 
       // --- Identify eligible tasks ---
-      const currentRunningTaskIds = new Set(runningTasks.keys());
       let activeDownloadCount = getActiveTaskCount('DOWNLOAD_CHAPTER');
-      let activeTranslationCount = getActiveTaskCount('TRANSLATE_CHAPTER');
+      let activeTranslationCount =
+        getActiveTaskCount('TRANSLATE_CHAPTER') +
+        getActiveTaskCount('TRANSLATE_NOVEL_META'); // Combine counts
 
-      let currentOtherRunning = 0; // Count currently running non-download/translate tasks
-      for (const taskId of runningTasks.keys()) {
-        const runningTask = JSON.parse(taskId) as BackgroundTask;
+      let currentOtherRunning = 0;
+      for (const runningTaskInfo of runningTasks.values()) {
+        const taskName = runningTaskInfo.task.task.name;
         if (
-          runningTask.name !== 'DOWNLOAD_CHAPTER' &&
-          runningTask.name !== 'TRANSLATE_CHAPTER'
+          taskName !== 'DOWNLOAD_CHAPTER' &&
+          taskName !== 'TRANSLATE_CHAPTER' &&
+          taskName !== 'TRANSLATE_NOVEL_META'
         ) {
           currentOtherRunning++;
         }
       }
 
-      for (const task of taskList) {
-        const taskId = JSON.stringify(task.task);
-        if (currentRunningTaskIds.has(taskId)) {
-          continue;
-        } // Already running
+      // Find the next task in the list that isn't already running
+      let taskToStart: QueuedBackgroundTask | undefined;
+      let taskIndex = -1;
+      for (let i = 0; i < taskList.length; i++) {
+        // Use index as a simple unique ID for this run
+        const taskIdentifier = `task_${i}`;
+        if (!runningTaskIdentifiers.has(taskIdentifier)) {
+          taskToStart = taskList[i];
+          taskIndex = i;
+          break;
+        }
+      }
 
+      if (taskToStart) {
         let canStart = false;
-        switch (task.task.name) {
+        const taskIdentifier = `task_${taskIndex}`; // ID for the task we might start
+
+        switch (taskToStart.task.name) {
           case 'DOWNLOAD_CHAPTER':
             if (activeDownloadCount < MAX_DOWNLOADS) {
               canStart = true;
+              activeDownloadCount++; // Increment potential count
             }
             break;
           case 'TRANSLATE_CHAPTER':
           case 'TRANSLATE_NOVEL_META':
+            const isChapterTranslation =
+              taskToStart.task.name === 'TRANSLATE_CHAPTER';
+            const chapterIdToCheck = isChapterTranslation
+              ? (taskToStart.task as TranslateChapterTask).data.chapterId
+              : undefined;
+
             if (
               activeTranslationCount < MAX_TRANSLATIONS &&
-              (task.task.name === 'TRANSLATE_CHAPTER'
-                ? !isDownloadTaskPending(task.task.data.chapterId, taskList)
-                : true)
+              (!chapterIdToCheck ||
+                !isDownloadTaskPending(chapterIdToCheck, taskList))
             ) {
               canStart = true;
+              activeTranslationCount++; // Increment potential count
             }
             break;
           default: // Other task types
             if (currentOtherRunning < MAX_OTHER) {
               canStart = true;
+              currentOtherRunning++; // Increment potential count
             }
             break;
         }
 
         if (canStart) {
-          tasksToStart.push(task);
-          // Increment counters *tentatively* to prevent over-scheduling in this loop iteration
-          if (task.task.name === 'DOWNLOAD_CHAPTER') {
-            activeDownloadCount++;
-          } else if (
-            task.task.name === 'TRANSLATE_CHAPTER' ||
-            task.task.name === 'TRANSLATE_NOVEL_META'
-          ) {
-            activeTranslationCount++;
-          } else {
-            currentOtherRunning++;
-          }
-          // Limit starting only one 'OTHER' task per loop iteration to be safe
-          if (
-            task.task.name !== 'DOWNLOAD_CHAPTER' &&
-            task.task.name !== 'TRANSLATE_CHAPTER' &&
-            task.task.name !== 'TRANSLATE_NOVEL_META'
-          ) {
-            break;
-          }
-        }
-      }
-      // --- End of identifying eligible tasks ---
+          startedNewTask = true;
+          // Use the index-based identifier
+          const currentTaskToStart = taskToStart; // Capture variable for closure
+          const currentTaskIdentifier = taskIdentifier;
 
-      // --- Start eligible tasks ---
-      for (const taskToStart of tasksToStart) {
-        const taskId = JSON.stringify(taskToStart.task);
-        if (runningTasks.has(taskId)) {
-          continue;
-        } // Should not happen, but safety check
+          // Update metadata immediately on start
+          manager.setMeta(meta => ({
+            ...meta,
+            isRunning: true,
+            progress: undefined,
+            progressText: 'Starting...',
+            error: null,
+          }));
 
-        startedNewTask = true;
-        const taskPromise = (async () => {
-          let wasDependencyError = false;
-          try {
-            await manager.executeTask(taskToStart);
-            doneTasks[taskToStart.task.name] =
-              (doneTasks[taskToStart.task.name] || 0) + 1;
-          } catch (error: any) {
-            wasDependencyError = error instanceof DependencyMissingError;
-            if (!wasDependencyError) {
-              await Notifications.scheduleNotificationAsync({
+          const taskPromise = manager
+            .executeTask(currentTaskToStart)
+            .then(() => {
+              doneTasks[currentTaskToStart.task.name] =
+                (doneTasks[currentTaskToStart.task.name] || 0) + 1;
+            })
+            .catch((error: any) => {
+              Notifications.scheduleNotificationAsync({
                 content: {
-                  title: taskToStart.meta.name,
+                  title: currentTaskToStart.meta.name,
                   body: error?.message || String(error),
                 },
                 trigger: null,
               });
-            } else {
-              // console.debug(`Dependency error for ${taskToStart.meta.name}, will retry.`);
-            }
-          } finally {
-            // Remove task from running map when done
-            runningTasks.delete(taskId);
+            })
+            .finally(() => {
+              // Task finished (success or failure)
+              runningTasks.delete(currentTaskIdentifier);
 
-            // Remove task from MMKV only if it completed successfully or failed for a non-dependency reason
-            if (!wasDependencyError) {
-              const currentTaskList = manager.getTaskList(); // Get fresh list
-              const currentIndex = currentTaskList.findIndex(
-                t => JSON.stringify(t.task) === taskId,
+              // Remove the completed/failed task from the MMKV list by matching task data
+              // This is less efficient but necessary if indices change
+              const currentList = manager.getTaskList();
+              const taskDataToMatch = JSON.stringify(currentTaskToStart.task);
+              const updatedList = currentList.filter(
+                t => JSON.stringify(t.task) !== taskDataToMatch,
               );
-              if (currentIndex >= 0) {
-                const updatedList = [...currentTaskList];
-                updatedList.splice(currentIndex, 1);
-                setMMKVObject(manager.STORE_KEY, updatedList);
-              }
-            }
-          }
-        })();
-        runningTasks.set(taskId, taskPromise);
-      }
-      // --- End of starting eligible tasks ---
+              setMMKVObject(manager.STORE_KEY, updatedList);
+            });
 
-      // If no tasks could be started, and tasks are still running or queued, wait.
-      if (!startedNewTask && (taskList.length > 0 || runningTasks.size > 0)) {
-        const runningPromises = Array.from(runningTasks.values());
-        try {
-          if (runningPromises.length > 0) {
-            await Promise.race([
-              ...runningPromises,
-              new Promise(resolve => setTimeout(resolve, 1500)), // Wait max 1.5 seconds
-            ]);
-          } else {
-            // No tasks running, but queue not empty (likely due to dependencies)
-            await new Promise(resolve => setTimeout(resolve, 1500)); // Wait before re-checking queue
-          }
-        } catch (e) {
-          // Ignore errors here (like task failures), they are handled in the task execution logic's finally block
+          runningTasks.set(currentTaskIdentifier, {
+            task: currentTaskToStart,
+            promise: taskPromise,
+          });
         }
       }
-    } // End of while loop
+
+      // Wait logic
+      if (!startedNewTask && (runningTasks.size > 0 || taskList.length > 0)) {
+        if (runningTasks.size > 0) {
+          // Wait for any running task to finish
+          await Promise.race(
+            Array.from(runningTasks.values()).map(v => v.promise),
+          );
+        } else {
+          // Nothing running, but tasks exist (likely waiting for dependencies)
+          await sleep(500);
+        }
+      }
+    }
   }
   getTaskName(task: BackgroundTask) {
     switch (task.name) {
