@@ -1,0 +1,311 @@
+name: Create Release with Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional: Specify the exact version (e.g., v2.0.1). If omitted, it will bump the patch version from the latest tag.'
+        required: false
+        type: string
+      base_branch:
+        description: 'Branch or commit SHA to base the release on'
+        required: true
+        default: 'master' # Make sure this is your main development branch
+        type: string
+
+permissions:
+  contents: write # To create releases, tags, and upload assets
+
+jobs:
+  prepare_release_data:
+    name: Prepare Release Data
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.determine_version.outputs.new_version }}
+      release_notes: ${{ steps.generate_notes.outputs.release_notes }}
+      contributors_list: ${{ steps.generate_notes.outputs.contributors_list }}
+      commit_sha: ${{ steps.get_sha.outputs.commit_sha }}
+      previous_tag: ${{ steps.get_tags.outputs.previous_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.base_branch }}
+          fetch-depth: 0 # Required for history
+
+      - name: Get target commit SHA
+        id: get_sha
+        run: echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get latest Git tag
+        id: get_tags
+        run: |
+          git fetch --tags --force
+          LATEST_TAG=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null) || echo "No tags found"
+          if [ -z "$LATEST_TAG" ] || [[ "$LATEST_TAG" == "No tags found" ]]; then
+             # If no tags, use the very first commit as the range start
+             PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+             echo "No previous tag found. Using first commit: $PREVIOUS_TAG"
+          else
+             PREVIOUS_TAG=$LATEST_TAG
+             echo "Found previous tag: $PREVIOUS_TAG"
+          fi
+          # Ensure previous_tag is never empty for log commands
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "Error: Could not determine a start point for history."
+            exit 1
+          fi
+          echo "previous_tag=${PREVIOUS_TAG}" >> $GITHUB_OUTPUT
+
+
+      - name: Determine Next Version
+        id: determine_version
+        run: |
+          MANUAL_VERSION="${{ github.event.inputs.version }}"
+          PREVIOUS_TAG="${{ steps.get_tags.outputs.previous_tag }}"
+          NEXT_VERSION=""
+
+          if [[ -n "$MANUAL_VERSION" ]]; then
+            # Ensure manual version starts with 'v' if it doesn't already
+            if [[ ! "$MANUAL_VERSION" =~ ^v ]]; then
+              MANUAL_VERSION="v$MANUAL_VERSION"
+            fi
+            echo "Using manually specified version: $MANUAL_VERSION"
+            NEXT_VERSION="$MANUAL_VERSION"
+          # Check if previous tag looks like vX.Y.Z
+          elif [[ "$PREVIOUS_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)($|-\w*) ]]; then
+             # Basic example: Bump patch version if previous tag looks like semver
+             MAJOR=${BASH_REMATCH[1]}
+             MINOR=${BASH_REMATCH[2]}
+             PATCH=${BASH_REMATCH[3]}
+             NEXT_PATCH=$((PATCH + 1))
+             NEXT_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+             echo "Determined next version (patch bump): $NEXT_VERSION"
+          else
+             # Fallback if no previous tag or not semver-like
+             # Based on your repo's history (v2.0.0-beta.3), let's start with v2.0.0
+             NEXT_VERSION="v2.0.0"
+             echo "WARN: Previous tag '$PREVIOUS_TAG' not found or not in vX.Y.Z format. Defaulting to $NEXT_VERSION"
+          fi
+
+          if [[ -z "$NEXT_VERSION" ]]; then
+            echo "Error: Could not determine next version."
+            exit 1
+          fi
+          # Remove 'v' prefix for potential use in android versioning if needed, keep it for tag/release name
+          echo "new_version=${NEXT_VERSION}" >> $GITHUB_OUTPUT # e.g., v2.0.1
+
+      - name: Generate Release Notes and Contributors
+        id: generate_notes
+        env:
+           # Need these outputs in the env context for the full changelog URL
+           PREVIOUS_TAG: ${{ steps.get_tags.outputs.previous_tag }}
+           NEW_VERSION: ${{ steps.determine_version.outputs.new_version }}
+           COMMIT_SHA: ${{ steps.get_sha.outputs.commit_sha }}
+        run: |
+          echo "Generating release notes between $PREVIOUS_TAG and $COMMIT_SHA"
+          TEMP_NOTES_FILE="TEMP_RELEASE_NOTES.md"
+          {
+            echo "## Changes in this release:"
+            echo ""
+            # List commits - Filter out merge commits
+            git log $PREVIOUS_TAG..$COMMIT_SHA --pretty=format:'* %s (%an)' --no-merges
+            echo ""
+            echo "## Contributors"
+            echo ""
+            # Get unique contributors, format as list
+            git log $PREVIOUS_TAG..$COMMIT_SHA --pretty=format:'* %an' --no-merges | sort -u
+            echo ""
+            # Add link to compare view on GitHub
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${NEW_VERSION}"
+          } > $TEMP_NOTES_FILE
+
+          # Prepare multiline output for GitHub Actions output
+          NOTES_CONTENT=$(cat $TEMP_NOTES_FILE)
+          # Sanitize content for multiline output EOF marker
+          NOTES_CONTENT="${NOTES_CONTENT//EOF/E_O_F}"
+          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Extract just the contributors list (comma-separated)
+          CONTRIBUTORS=$(git log $PREVIOUS_TAG..$COMMIT_SHA --pretty=format:'%an' --no-merges | sort -u | paste -sd ', ' -)
+          echo "contributors_list=${CONTRIBUTORS}" >> $GITHUB_OUTPUT
+
+          echo "--- Generated Notes ---"
+          cat $TEMP_NOTES_FILE
+          echo "-----------------------"
+          echo "Contributors: ${CONTRIBUTORS}"
+
+
+  build_and_release:
+    name: Build, Tag, and Release
+    needs: prepare_release_data
+    runs-on: ubuntu-latest
+    env:
+      # Secrets/Vars needed for the build - ensure these are set in Repo Settings > Secrets/Variables > Actions
+      MYANIMELIST_CLIENT_ID: ${{ vars.MYANIMELIST_CLIENT_ID }}
+      ANILIST_CLIENT_ID: ${{ vars.ANILIST_CLIENT_ID }}
+      # Define commit SHA based on the commit being released
+      COMMIT_SHA: ${{ needs.prepare_release_data.outputs.commit_sha }}
+
+    steps:
+      - name: Checkout specific commit for release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare_release_data.outputs.commit_sha }}
+          fetch-depth: 0 # Fetch history to calculate commit count
+
+      - name: Set Commit Count & Short SHA Env Var
+        id: set_commit_env
+        run: |
+           # Count commits reachable from the target commit
+           echo "COMMIT_COUNT=$(git rev-list --count ${{ env.COMMIT_SHA }})" >> $GITHUB_ENV
+           # Get short SHA (usually 7 chars)
+           echo "COMMIT_ID=$(echo ${{ env.COMMIT_SHA }} | cut -c1-7)" >> $GITHUB_ENV
+
+      # --- Build Steps (Copied & Adapted from build.yml) ---
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm & node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-cache-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cache-npm-
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Create .env for Build
+        run: |
+          echo "Creating .env file..."
+          cat > .env << EOF
+          MYANIMELIST_CLIENT_ID=${{ env.MYANIMELIST_CLIENT_ID }}
+          ANILIST_CLIENT_ID=${{ env.ANILIST_CLIENT_ID }}
+          GIT_HASH=${{ env.COMMIT_ID }}
+          RELEASE_DATE=$(date --utc +'%d/%m/%y %I:%M %p %Z')
+          BUILD_TYPE=GitHub Release Action (${{ needs.prepare_release_data.outputs.new_version }})
+          EOF
+          echo ".env file created:"
+          cat .env
+
+      - name: Cache Gradle Wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Cache Gradle Dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-caches-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-caches-
+
+      - name: Cache Android build intermediates
+        uses: actions/cache@v4
+        id: android-build-cache # Give cache step an id
+        with:
+          path: |
+            android/app/build/generated
+            android/app/build/intermediates
+            android/app/build/tmp
+            android/.gradle
+          key: ${{ runner.os }}-android-build-${{ env.COMMIT_SHA }} # Key includes commit SHA
+          restore-keys: |
+            ${{ runner.os }}-android-build-
+
+      - name: Make Gradlew Executable
+        run: cd android && chmod +x ./gradlew
+
+      - name: Build Android Release APK
+        run: |
+          echo "Starting Android Release Build..."
+          cd android && ./gradlew assembleRelease --no-daemon
+          echo "Build finished. Renaming APK..."
+          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/LNReader.apk
+          echo "Standard APK Renamed: LNReader.apk"
+
+      - name: Set Artifact Names and Paths
+        id: artifact_names
+        run: |
+          APK_NAME="LNReader.apk"
+          CUSTOM_APK_NAME="LNReader-r${{ env.COMMIT_COUNT }}(${{ env.COMMIT_ID }})-customID.apk"
+          APK_PATH="android/app/build/outputs/apk/release/${APK_NAME}"
+          CUSTOM_APK_PATH="android/app/build/outputs/apk/release/${CUSTOM_APK_NAME}"
+
+          echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
+          echo "custom_apk_name=${CUSTOM_APK_NAME}" >> $GITHUB_OUTPUT
+          echo "apk_path=${APK_PATH}" >> $GITHUB_OUTPUT
+          echo "custom_apk_path=${CUSTOM_APK_PATH}" >> $GITHUB_OUTPUT
+          echo "Output directory: android/app/build/outputs/apk/release/"
+
+      - name: Build Custom ID APK
+        id: build_custom
+        run: |
+          echo "Modifying strings.xml for custom build..."
+          # Use sed with a different delimiter like '#' in case COMMIT_ID has '/'
+          sed -i "s#LNReader#LNReader-r${{ env.COMMIT_COUNT }}(${{ env.COMMIT_ID }})#g" android/app/src/main/res/values/strings.xml
+          echo "Starting Android Custom ID Build..."
+          cd android && ./gradlew assembleRelease --no-daemon -PcustomAppId=com.rajarsheechatterjee.LNReader.commit_${{ env.COMMIT_ID }}
+          echo "Custom build finished. Renaming APK..."
+          mv app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/${{ steps.artifact_names.outputs.custom_apk_name }}"
+          echo "Custom APK Renamed: ${{ steps.artifact_names.outputs.custom_apk_name }}"
+        shell: bash
+
+      # --- Create Tag and Release ---
+      - name: Create Git Tag
+        run: |
+          echo "Tagging commit ${{ env.COMMIT_SHA }} with tag ${{ needs.prepare_release_data.outputs.new_version }}"
+          git tag ${{ needs.prepare_release_data.outputs.new_version }} ${{ env.COMMIT_SHA }}
+          echo "Pushing tag ${{ needs.prepare_release_data.outputs.new_version }}..."
+          git push origin ${{ needs.prepare_release_data.outputs.new_version }}
+
+      - name: Create GitHub Release
+        id: create_release # Give it an ID to reference its upload_url
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.prepare_release_data.outputs.new_version }}
+          release_name: Release ${{ needs.prepare_release_data.outputs.new_version }}
+          commitish: ${{ env.COMMIT_SHA }} # Use the specific commit SHA
+          body: ${{ needs.prepare_release_data.outputs.release_notes }}
+          draft: false # Set to true to review before publishing
+          prerelease: false # Set based on whether it's a pre-release (e.g., contains 'beta', 'alpha')
+
+      # --- Upload Assets to Release ---
+      - name: Upload Standard APK to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # URL from the create_release step
+          asset_path: ${{ steps.artifact_names.outputs.apk_path }}
+          asset_name: ${{ steps.artifact_names.outputs.apk_name }}
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Upload Custom ID APK to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.artifact_names.outputs.custom_apk_path }}
+          asset_name: ${{ steps.artifact_names.outputs.custom_apk_name }}
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Clean up Gradle cache # Optional: clean up cache if space is a concern
+        if: always() # Run even if previous steps fail
+        run: |
+          echo "Cleaning up Gradle cache..."
+          rm -rf ~/.gradle/caches
+          rm -rf ~/.gradle/wrapper
