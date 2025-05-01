@@ -13,7 +13,7 @@ import {
 import { ChapterInfo } from '@database/types';
 import { EdgeTTSClient, OUTPUT_FORMAT } from '@services/tts/EdgeTTSProvider';
 import * as FileSystem from 'expo-file-system';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 
 // Type definitions (could be moved to a types file later)
 type WebViewPostEvent = {
@@ -108,8 +108,24 @@ export const useWebViewTTS = (
     }
   }, []);
 
-  // Cleanup effect
+  // Cleanup effect & Background Audio Setup
   useEffect(() => {
+    const setAudioMode = async () => {
+      try {
+        // Configure audio session for background playback
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false, // We are not recording
+          staysActiveInBackground: true, // *** THIS IS THE KEY FIX ***
+          playsInSilentModeIOS: true, // Allow playback in silent mode on iOS
+          interruptionModeIOS: InterruptionModeIOS.DoNotMix, // Stop other audio sources
+          interruptionModeAndroid: InterruptionModeAndroid.DoNotMix, // Stop other audio sources
+          shouldDuckAndroid: false, // Don't lower volume of other apps
+          playThroughEarpieceAndroid: false, // Use the speaker
+        });
+      } catch (e) {}
+    };
+
+    setAudioMode(); // Call the function to set the audio mode
     shouldAutoStartTTS.current = getShouldAutoStartTTS();
 
     return () => {
@@ -130,8 +146,10 @@ export const useWebViewTTS = (
       } else {
         clearLocalTimers();
       }
+      // Optional: Reset audio mode on cleanup if needed, though usually not required
+      // Consider if resetting is necessary based on app-wide audio needs
     };
-  }, [clearLocalTimers]);
+  }, [clearLocalTimers]); // Keep dependencies minimal for setup effect
 
   // Define stopTTSAndClearState first as other callbacks depend on it
   const stopTTSAndClearState = useCallback(async () => {
@@ -233,6 +251,7 @@ export const useWebViewTTS = (
   // Helper to unload the preloaded sound and delete its file
   const unloadPreloadedSound = async () => {
     if (preloadedSoundRef.current) {
+      console.log('[TTS Hook] unloadPreloadedSound called.');
       console.log(
         'Unloading preloaded sound for:',
         preloadedSoundRef.current.text,
@@ -256,6 +275,7 @@ export const useWebViewTTS = (
   // Modify unloadSound to also delete the file
   const unloadSound = async () => {
     if (audioSoundRef.current) {
+      console.log('[TTS Hook] unloadSound called.');
       console.log('Unloading current sound');
       const soundToUnload = audioSoundRef.current;
       audioSoundRef.current = null; // Clear ref immediately
@@ -579,12 +599,13 @@ export const useWebViewTTS = (
 
               const textToSpeak = event.data;
               console.log(
-                `Received speak request for [${ttsProvider}]:`,
-                textToSpeak,
+                `[TTS Hook] Received speak request for [${ttsProvider}]:`,
+                textToSpeak.substring(0, 50) + '...', // Log truncated text
               );
 
               // Route based on provider
               if (ttsProvider === 'Edge' && tts?.voice?.identifier) {
+                console.log('[TTS Hook] Using Edge TTS provider.');
                 // Simple Edge TTS implementation
                 try {
                   // Check if we have this text already preloaded
@@ -608,8 +629,13 @@ export const useWebViewTTS = (
                     });
 
                     // Start playback
+                    console.log('[TTS Hook] Playing preloaded Edge TTS sound.');
                     await audioSoundRef.current.playAsync();
                     return true;
+                  } else {
+                    console.log(
+                      '[TTS Hook] No preloaded sound found, fetching Edge TTS audio.',
+                    );
                   }
 
                   await unloadPreloadedSound(); // Clean up any preloaded audio
@@ -709,30 +735,60 @@ export const useWebViewTTS = (
                   // Create and play the audio
                   const { sound } = await Audio.Sound.createAsync(
                     { uri: tempFilePath },
-                    { shouldPlay: true },
+                    { shouldPlay: true }, // Play immediately
                   );
+                  console.log('[TTS Hook] Edge TTS sound created and playing.');
 
                   audioSoundRef.current = sound;
 
                   // Set up a listener for completion - SIMPLIFIED
                   sound.setOnPlaybackStatusUpdate(status => {
-                    if (status.isLoaded && status.didJustFinish) {
-                      // Important: call next on the webview
-                      webViewRef.current?.injectJavaScript('tts.next()');
-                      // Clean up
-                      unloadSound();
+                    if (!status.isLoaded) {
+                      // If the status update indicates an error, handle it.
+                      // 'status' type is AVPlaybackStatusError when !isLoaded and error exists
+                      if (status.error) {
+                        console.error(
+                          '[TTS Hook] Edge Playback Error (not loaded):',
+                          status.error,
+                        );
+                        webViewRef.current?.injectJavaScript(
+                          'tts.stop("error")',
+                        );
+                        unloadSound(); // Unload on error
+                      }
+                      // If it's not loaded but not an error, it might be unloading, ignore or log.
+                      return;
                     }
+
+                    // If loaded, status type is AVPlaybackStatusSuccess
+                    if (status.didJustFinish) {
+                      console.log('[TTS Hook] Edge TTS playback finished.');
+                      webViewRef.current?.injectJavaScript('tts.next()');
+                      unloadSound(); // Unload after finishing
+                    }
+
+                    // Note: AVPlaybackStatusSuccess (when status.isLoaded is true) does not have an 'error' property.
+                    // Errors during playback while loaded might manifest differently,
+                    // potentially stopping playback or changing state without 'didJustFinish'.
+                    // This simplified check focuses on completion and initial load errors.
                   });
                 } catch (error) {
-                  console.error('EdgeTTS Error:', error);
+                  console.error('[TTS Hook] EdgeTTS Speak Error:', error); // Log specific error
                   // If Edge TTS fails, try falling back to system TTS
                   try {
+                    console.log(
+                      '[TTS Hook] Falling back to System TTS due to Edge error.',
+                    );
                     Speech.speak(textToSpeak, {
                       onDone: () => {
+                        console.log('[TTS Hook] System TTS fallback finished.');
                         webViewRef.current?.injectJavaScript('tts.next()');
                       },
                       onError: error => {
-                        console.error('Speech Error:', error);
+                        console.error(
+                          '[TTS Hook] System TTS fallback Error:',
+                          error,
+                        );
                         webViewRef.current?.injectJavaScript(
                           'tts.stop("error")',
                         );
@@ -741,33 +797,40 @@ export const useWebViewTTS = (
                       rate: tts?.rate || 1,
                     });
                   } catch (fallbackError) {
-                    console.error('Fallback TTS also failed:', fallbackError);
+                    console.error(
+                      '[TTS Hook] Fallback System TTS also failed:',
+                      fallbackError,
+                    );
                     webViewRef.current?.injectJavaScript('tts.stop("error")');
                   }
                 }
               } else {
+                console.log('[TTS Hook] Using System TTS provider.');
                 // System TTS - simplified approach like the original
                 Speech.speak(textToSpeak, {
                   onDone: () => {
+                    console.log('[TTS Hook] System TTS finished.');
                     webViewRef.current?.injectJavaScript('tts.next()');
                   },
                   onError: error => {
-                    console.error('Speech Error:', error);
+                    console.error('[TTS Hook] System Speech Error:', error);
                     webViewRef.current?.injectJavaScript('tts.stop("error")');
                   },
                   voice: tts?.voice?.identifier,
                   pitch: tts?.pitch || 1,
                   rate: tts?.rate || 1,
                 });
-              }
+              } // End of if/else for ttsProvider
             } else {
+              // If sleep timer is NOT active AND sleep timer is enabled
               webViewRef.current?.injectJavaScript('tts.stop("timer_expired")');
             }
           } else {
+            // If event.data is empty or not a string
             // Empty speak event, just advance
             webViewRef.current?.injectJavaScript('tts.next()');
           }
-          return true;
+          return true; // End of case 'speak'
 
         case 'stop-speak':
           Speech.stop();
